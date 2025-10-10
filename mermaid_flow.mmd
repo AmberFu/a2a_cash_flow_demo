@@ -1,0 +1,28 @@
+sequenceDiagram
+  autonumber
+  participant Client as User/System
+  participant Root as Root Agent (EKS/Lambda)
+  participant Store as Memory Store (Redis/DDB/S3)
+  participant Ext as Remote Agent (3rd party, HTTPS)
+
+  Client->>Root: task(input)
+  Root->>Store: load short_term / long_term memory
+  Root->>Ext: POST /a2a/invoke (envelope + idempotency_key + auth)
+  alt quick result
+    Ext-->>Root: 200 {status: "SUCCEEDED", output, memory_patch}
+    Root->>Store: apply memory_patch & persist
+    Root-->>Client: final output
+  else slow/async
+    Ext-->>Root: 202 {ticket, eta, callback_url?}
+    alt remote-callback
+      Ext-->>Root: POST /a2a/callback {ticket, output, memory_patch}
+      Root->>Store: persist memory_patch
+      Root-->>Client: final output
+    else polling
+      loop until done/timeout
+        Root->>Ext: GET /a2a/result?ticket=...
+        Ext-->>Root: {status, output?}
+      end
+      Root-->>Client: final output
+    end
+  end

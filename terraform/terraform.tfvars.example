@@ -1,0 +1,39 @@
+# terraform.tfvars
+
+# ----------------------------------------
+# 部署前必須填寫
+# ----------------------------------------
+
+# For DynamoDB
+a2a_tasks_table_name = "a2a_tasks***"
+a2a_audit_table_name = "a2a_audit***"
+
+# For SQS Queues & EventBridge
+remote_a_queue_name = "a2a-dispatch-***"
+remote_b_queue_name = "a2a-dispatch-***"
+callback_queue_name = "a2a-callback-***"
+hitl_queue_name = "a2a-hitl-***"
+
+# IAM Role and Policy for EventBridge to SQS
+eventbridge_to_sqs_role_name = "***"
+eventbridge_sqs_send_policy_attachment_name = "***"
+
+# EventBridge Bus and Rules
+a2a_bus_name = "a2a-cash-flow-demo-bus"
+dispatch_remote_a_rule_name = "***"
+dispatch_remote_b_rule_name = "***"
+
+# 您的 AWS VPC ID (與 d-redis-sg 所在的 VPC 相同)
+vpc_id = "vpc-******" 
+
+# 部署 EKS 後，必須手動填寫 EKS Worker Node (或您的 EKS Fargate Profile) 
+eks_worker_node_sg_id = "sg-******" 
+
+# ----------------------------------------
+# Redis 資訊 (d-redis-sg)
+# ----------------------------------------
+
+# 這些使用 variables.tf 中的預設值，無需更改，除非您需要調整
+# redis_endpoint = "d-redis-sg-******"
+# redis_port     = 0000
+# redis_target_sg_id = "sg-******"

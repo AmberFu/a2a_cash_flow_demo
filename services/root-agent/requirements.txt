@@ -1,0 +1,24 @@
+# Web Framework
+fastapi
+uvicorn[standard]
+prometheus-fastapi-instrumentator
+
+# LangChain & LangGraph
+langchain
+langgraph
+langchain_openai  # or your preferred LLM provider
+
+# AWS SDK
+boto3
+
+# Configuration management
+pydantic-settings
+python-dotenv
+
+# For state persistence with DynamoDB + S3
+langgraph-checkpoint-amazon-dynamodb
+langgraph-checkpoint-amazon-dynamodb[infra]
+
+# For Redis
+redis
+redis[hiredis]
