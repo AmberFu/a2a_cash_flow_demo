@@ -1,0 +1,21 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+        "Sid": "AllowDescribeSpecificCluster",
+        "Effect": "Allow",
+        "Action": [
+            "eks:DescribeCluster"
+        ],
+        "Resource": "arn:aws:eks:ap-southeast-1:182399696164:cluster/ds-eks-cluster"
+        },
+        {
+        "Sid": "OptionalListClusters",
+        "Effect": "Allow",
+        "Action": [
+            "eks:ListClusters"
+        ],
+        "Resource": "*"
+        }
+    ]
+}

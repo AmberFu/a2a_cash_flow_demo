@@ -6,6 +6,23 @@ __pycache__/
 # C extensions
 *.so
 
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!*.example.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# 鎖檔建議保留在版控（鎖定 provider 版本）
+!.terraform.lock.hcl
+
+infra/
+
 # Distribution / packaging
 .Python
 build/

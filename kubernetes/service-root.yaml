@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: root-agent-service
+  namespace: a2a-demo
+spec:
+  selector:
+    app: root-agent
+  ports:
+    - protocol: TCP
+      port: 50000       # 🚨 Service 提供的 Port
+      targetPort: 50000 # 🚨 容器實際運行的 Port
+  type: ClusterIP

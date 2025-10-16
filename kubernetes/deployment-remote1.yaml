@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: remote-agent-1
+  namespace: a2a-demo # 更新：使用 a2a-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: remote-agent-1
+  template:
+    metadata:
+      labels:
+        app: remote-agent-1
+    spec:
+      serviceAccountName: ds-a2a-remote-agent-a-sa  # 使用 IRSA Service Account
+      containers:
+      - name: remote-agent-1-container
+        image: 182399696164.dkr.ecr.ap-southeast-1.amazonaws.com/image/a2a_demo_remote_agent1:20251010052359 # 🚨 替換成你的 Docker image 路徑
+        ports:
+        - containerPort: 50001

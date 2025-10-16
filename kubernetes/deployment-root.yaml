@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: root-agent
+  namespace: a2a-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: root-agent
+  template:
+    metadata:
+      labels:
+        app: root-agent
+    spec:
+      # 對齊 tfvars：root_agent_sa_name = "ds-a2a-root-agent-sa"
+      serviceAccountName: ds-a2a-root-agent-sa
+      containers:
+      - name: root-agent-container
+        image: 182399696164.dkr.ecr.ap-southeast-1.amazonaws.com/image/a2a_demo_root_agent:20251015092919
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 50000
+        env:
+          # --- 遠端 Agent 連線配置 (保持不變) ---
+          - name: REMOTE1_URL
+            value: "http://remote-agent-1-service"
+          - name: REMOTE2_URL
+            value: "http://remote-agent-2-service"
+            
+          # --- AWS & Checkpoint 配置 (新增/更新) ---
+          - name: AWS_REGION
+            value: "ap-southeast-1"
+
+          # 用於 tools.py 發送事件
+          - name: EVENT_BUS_NAME 
+            value: "a2a-cash-flow-demo-bus" # 您的 Event Bus 名稱
+            
+          # DDB Tables for LangGraph Checkpoint and Audit
+          - name: DDB_A2A_TASKS_TABLE_NAME # 更新變數名稱以匹配 graph.py 中的預期
+            value: "ds_demo_a2a_tasks"
+          - name: DDB_A2A_AUDIT_TABLE_NAME # 新增：Audit 表格名稱
+            value: "ds_demo_a2a_audit"
+          
+          # Redis Configuration for Short-term Memory (e.g., Session Cache)
+          # Redis: d-redis-sg (endpoint: d-redis-sg-iqd4qt.serverless.apse1.cache.amazonaws.com:6379)
+          - name: REDIS_HOST
+            value: "d-redis-sg-iqd4qt.serverless.apse1.cache.amazonaws.com"
+          - name: REDIS_PORT
+            value: "6379"
