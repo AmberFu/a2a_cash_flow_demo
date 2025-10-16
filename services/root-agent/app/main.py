@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 import uvicorn
 import os
 
@@ -10,22 +11,41 @@ import logging
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
+# pip install prometheus-fastapi-instrumentator
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from a2a.graph import get_graph_app
 from langchain_core.messages import HumanMessage, ToolMessage
 
+
 # --- Application Setup ---
+PORT = int(os.environ.get("PORT", 50000))
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+)
+logging.getLogger("langgraph").setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Application is starting up...")
+    yield
+    # Clean up the ML models and release the resources
+    print("Application is shutting down...")
+
 app = FastAPI(
     title="A2A Root Agent API",
     description="Manages and dispatches tasks for the A2A Cash Flow Demo",
     version="1.0.0",
+    lifespan=lifespan
 )
+# 盡可能早地註冊中間件，在定義完 app 之後，且在任何啟動事件之前
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 # Initialize the LangGraph Application
 # This creates the compiled graph with its checkpointer
 graph_app = get_graph_app()
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- API Models ---
 class CreateTaskRequest(BaseModel):
@@ -57,7 +77,7 @@ async def create_task(request: CreateTaskRequest):
     Creates a new task and starts the workflow.
     """
     task_id = str(uuid.uuid4())
-    logging.info(f"Received request to create task for loan case: {request.loan_case_id}. Assigned Task ID: {task_id}")
+    logger.info(f"Received request to create task for loan case: {request.loan_case_id}. Assigned Task ID: {task_id}")
 
     # The config dictionary links a run to a persistent thread_id
     config = {"configurable": {"thread_id": task_id}}
@@ -71,16 +91,18 @@ async def create_task(request: CreateTaskRequest):
     }
 
     try:
-        # `invoke` will run the graph until the first interruption
-        graph_app.invoke(initial_state, config)
-        
-        # We can also update the state directly if needed, for instance, to store the initial payload
-        # graph_app.update_state(config, initial_state)
-        # graph_app.invoke(None, config) # Then invoke with no input to trigger the entrypoint
+        logger.info(">>> Start graph_app.invoke...")
+        graph_app.invoke(initial_state, config=config)
+        logger.info(">>> Graph finished")
         
     except Exception as e:
-        logging.error(f"Failed to start graph for task {task_id}. Error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to start workflow: {e}")
+        # 如果是 EventBridge 失敗，錯誤會在這裡被捕獲
+        logger.error(f"Failed to start graph for task {task_id}. Error: {e}")
+        # 為了更友善的錯誤提示，我們可以檢查錯誤是否為預期的連線/權限問題
+        if "events" in str(e) or "PutEvents" in str(e):
+             raise HTTPException(status_code=503, detail=f"Workflow failed to start due to external AWS service error (EventBridge/DynamoDB): {e}")
+        else:
+             raise HTTPException(status_code=500, detail=f"Failed to start workflow: {e}")
 
     return {"task_id": task_id, "message": "Task created and workflow initiated."}
 
@@ -91,7 +113,7 @@ async def handle_callback(request: CallbackRequest):
     This resumes the graph execution.
     """
     task_id = request.task_id
-    logging.info(f"Received callback for task {task_id} from {request.source} with status '{request.status}'")
+    logger.info(f"Received callback for task {task_id} from {request.source} with status '{request.status}'")
 
     config = {"configurable": {"thread_id": task_id}}
 
@@ -123,7 +145,7 @@ async def handle_callback(request: CallbackRequest):
         graph_app.invoke({"messages": [tool_message]}, config)
 
     except Exception as e:
-        logging.error(f"Error processing callback for task {task_id}. Error: {e}")
+        logger.error(f"Error processing callback for task {task_id}. Error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process callback: {e}")
 
     return {"message": f"Callback for task {task_id} processed."}
@@ -134,7 +156,7 @@ async def submit_hitl_answer(task_id: str, request: HITLAnswerRequest):
     """
     Endpoint for a human to submit required information, resuming the graph.
     """
-    logging.info(f"Received HITL answer for task {task_id}.")
+    logger.info(f"Received HITL answer for task {task_id}.")
     config = {"configurable": {"thread_id": task_id}}
     
     try:
@@ -162,20 +184,11 @@ async def submit_hitl_answer(task_id: str, request: HITLAnswerRequest):
         graph_app.invoke({"messages": [human_message]}, config)
         
     except Exception as e:
-        logging.error(f"Error processing HITL answer for task {task_id}. Error: {e}")
+        logger.error(f"Error processing HITL answer for task {task_id}. Error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process HITL answer: {e}")
 
     return {"message": f"HITL answer for task {task_id} submitted and workflow resumed."}
 
-
-# pip install prometheus-fastapi-instrumentator
-from prometheus_fastapi_instrumentator import Instrumentator
-
-@app.on_event("startup")
-async def _startup():
-    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
-
-
 if __name__ == "__main__":
     # 這裡就用你指定的寫法；注意：reload 在容器內要搭配掛載原始碼才看得到變更
-    uvicorn.run(app="main:app", host="0.0.0.0", port=PORT, reload=True)
+    uvicorn.run(app="main:app", host="0.0.0.0", port=PORT)

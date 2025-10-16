@@ -25,7 +25,7 @@ echo "--- 1. ECR Login ---"
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 echo "=== Login ECR Succeeded! ==="
 
-# --- 2. Root Agent 處理 ---
+# --- 2. Root Agent 處理 - create ECR image ---
 AGENT_NAME="a2a_demo_root_agent"
 ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
 echo "--- Building $AGENT_NAME ---"
@@ -35,7 +35,7 @@ docker push ${ECR_IMAGE}:${VERSION_TAG}
 echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
 
 
-# # --- 3. Remote Agent 1 處理 ---
+# # --- 3. Remote Agent 1 處理 - create ECR image ---
 # AGENT_NAME="a2a_demo_remote_agent1"
 # ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
 # echo "--- Building $AGENT_NAME ---"
@@ -45,7 +45,7 @@ echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
 # echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
 
 
-# # --- 4. Remote Agent 2 處理 ---
+# # --- 4. Remote Agent 2 處理 - create ECR image ---
 # AGENT_NAME="a2a_demo_remote_agent2"
 # ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
 # echo "--- Building $AGENT_NAME ---"
@@ -123,10 +123,10 @@ echo "\n====== CD Deployment Succeeded! ======\n"
 
 
 # --- 7. 部署後檢查與日誌輸出 ---
-echo "Wait for rollout completion (max 120 sec)..."
-kubectl rollout status deployment/root-agent -n $K8S_NAMESPACE --timeout=120s
-# kubectl rollout status deployment/remote-agent-1 -n $K8S_NAMESPACE --timeout=120s
-# kubectl rollout status deployment/remote-agent-2 -n $K8S_NAMESPACE --timeout=120s
+echo "Wait for rollout completion (max 300 sec)..."
+kubectl rollout status deployment/root-agent -n $K8S_NAMESPACE --timeout=300s
+# kubectl rollout status deployment/remote-agent-1 -n $K8S_NAMESPACE --timeout=300s
+# kubectl rollout status deployment/remote-agent-2 -n $K8S_NAMESPACE --timeout=300s
 
 
 sleep 120
@@ -152,3 +152,77 @@ echo "------"
 # echo "\$REMOTE_AG1_POD: $REMOTE_AG2_POD"
 # kubectl logs $REMOTE_AG2_POD -n a2a-demo --tail=100
 # echo "------"
+
+
+
+######## 測試時：
+# 確保您的 kubectl 已配置並指向 EKS 叢集
+kubectl port-forward svc/root-agent-service 50000:50000 --namespace a2a-demo
+# 執行後，這個指令會持續運行在前景
+
+# 測試 POST /tasks
+# # POST /tasks (Start Workflow)
+# TASK_ID=$(curl -s -X POST http://127.0.0.1:50000/tasks \
+#   -H 'Content-Type: application/json' \
+#   -d '{
+#     "loan_case_id": "LCASE-20251014-001"
+#   }' | jq -r .task_id)
+# echo "Started Task ID: $TASK_ID"
+
+
+
+
+# ## 在 EKS Pod 內直接驗證 IRSA 是否成功
+# ROOT_POD=$(kubectl get pods -n a2a-demo -l app=root-agent -o jsonpath='{.items[0].metadata.name}')
+# kubectl exec -it $ROOT_POD -n a2a-demo -- bash
+
+# # 這條命令會嘗試使用 IRSA 提供的臨時憑證去獲取調用者的身份
+# > aws sts get-caller-identity
+# > 應該看到類似 arn:aws:iam::<account_id>:role/eks-a2a-root-agent-sa-role 的 ARN
+
+# # 確認您的 EKS 集群已啟用 OIDC Provider
+# EKS_CLUSTER_NAME="ds-eks-cluster"
+# aws eks describe-cluster --name $EKS_CLUSTER_NAME --query "cluster.identity.oidc.issuer" --output text
+# """
+# sagemaker-user@default:~$ EKS_CLUSTER_NAME="ds-eks-cluster"
+# aws eks describe-cluster --name $EKS_CLUSTER_NAME --query "cluster.identity.oidc.issuer" --output text
+# https://oidc.eks.ap-southeast-1.amazonaws.com/id/1DDF0561C57CB2ABDFE048B7FEB180FA
+# """
+
+## 確認部署錯誤或問題：尤其是當 POD 起不起來時
+# kubectl -n a2a-demo get events --sort-by=.lastTimestamp
+
+## 確認狀態？！
+# kubectl -n a2a-demo get rs -l app=root-agent -o wide
+
+# ## 怎麼查 Node 的 security group?
+# EKS_CLUSTER_NAME="ds-eks-cluster"
+# NODE_GROUP="ds-node-group"
+# aws eks describe-nodegroup \
+#   --cluster-name $EKS_CLUSTER_NAME \
+#   --nodegroup-name $NODE_GROUP \
+#   --query "nodegroup.resources" \
+#   --output json
+# """
+# {
+#     "autoScalingGroups": [
+#         {
+#             "name": "eks-ds-node-group-96cab485-d9d4-71f4-7527-9f08bf578fc3"
+#         }
+#     ]
+# }
+# """
+# # 1) 先拿到 ASG 名稱（你已經有了）
+# ASG_NAME="eks-ds-node-group-96cab485-d9d4-71f4-7527-9f08bf578fc3"
+
+# # 2) 取出這個 ASG 目前的 EC2 instance IDs
+# INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+#   --auto-scaling-group-names "$ASG_NAME" \
+#   --query "AutoScalingGroups[0].Instances[*].InstanceId" \
+#   --output text)
+
+# # 3) 直接查每台 EC2 綁定的 SG
+# aws ec2 describe-instances \
+#   --instance-ids $INSTANCE_IDS \
+#   --query "Reservations[].Instances[].SecurityGroups[].GroupId" \
+#   --output text

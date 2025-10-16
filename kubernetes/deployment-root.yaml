@@ -13,9 +13,11 @@ spec:
       labels:
         app: root-agent
     spec:
+      # 對齊 tfvars：root_agent_sa_name = "ds-a2a-root-agent-sa"
+      serviceAccountName: ds-a2a-root-agent-sa
       containers:
       - name: root-agent-container
-        image: 182399696164.dkr.ecr.ap-southeast-1.amazonaws.com/image/a2a_demo_root_agent:20251010163515
+        image: 182399696164.dkr.ecr.ap-southeast-1.amazonaws.com/image/a2a_demo_root_agent:20251015092919
         imagePullPolicy: Always
         ports:
         - containerPort: 50000
@@ -39,12 +41,6 @@ spec:
             value: "ds_demo_a2a_tasks"
           - name: DDB_A2A_AUDIT_TABLE_NAME # 新增：Audit 表格名稱
             value: "ds_demo_a2a_audit"
-          
-          # S3 Bucket for Large Checkpoint Fields
-          # S3 路徑：s3://d-s3-cube-project-sg/ds-test-a2a-artifacts/
-          # 只需要 bucket 名稱
-          - name: S3_CHECKPOINT_BUCKET_NAME
-            value: "d-s3-cube-project-sg"
           
           # Redis Configuration for Short-term Memory (e.g., Session Cache)
           # Redis: d-redis-sg (endpoint: d-redis-sg-iqd4qt.serverless.apse1.cache.amazonaws.com:6379)

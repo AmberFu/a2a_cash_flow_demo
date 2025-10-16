@@ -12,8 +12,17 @@ RUN useradd -m appuser
 
 # 安裝系統套件（包含 curl）
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl && \
+    apt-get install -y --no-install-recommends curl unzip && \
     rm -rf /var/lib/apt/lists/*
+
+# Download, unzip, and install AWS CLI v2
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    rm awscliv2.zip
+
+# Verify installation (optional)
+RUN aws --version
 
 # 安裝相依
 COPY requirements.txt .

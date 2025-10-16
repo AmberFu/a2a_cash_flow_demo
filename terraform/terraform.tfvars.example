@@ -4,6 +4,19 @@
 # 部署前必須填寫
 # ----------------------------------------
 
+# Basic info
+eks_cluster_name = "*****"
+region = "us-west-2"
+k8s_namespace = "*****"
+
+# Service Account & IAM Role
+root_agent_sa_name = "***-root-agent-sa"
+root_agent_sa_role_name = "***-root-agent-sa-role"
+remote_agent_a_sa_name = "***-remote-agent-a-sa"
+remote_agent_a_sa_role_name = "***-remote-agent-a-sa-role"
+remote_agent_b_sa_name = "***-remote-agent-b-sa"
+remote_agent_b_sa_role_name = "***-remote-agent-b-sa-role"
+
 # For DynamoDB
 a2a_tasks_table_name = "a2a_tasks***"
 a2a_audit_table_name = "a2a_audit***"
