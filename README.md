@@ -11,6 +11,7 @@ a2a-ds-cashflow-demo/
 │   │   └─ README.md
 │   ├─ remote-agent-1/                # Weather Agent (agent 1)
 │   ├─ remote-agent-2/                # Train Agent (agent 2)
+│   ├─ summary-agent/                 # Summary Agent（彙整 Weather/Train 結果）
 │   └─ root-agent/                    # Root Agent FastAPI 應用，支援 JSON-RPC 與 EventBridge/SQS
 │       └─ app/
 │           ├─ main.py
@@ -20,6 +21,7 @@ a2a-ds-cashflow-demo/
 ├─ kubernetes/
 │   ├─ cicd.sh                        # EventBridge/SQS 佈署腳本
 │   ├─ cicd_jsonrpc.sh                # JSON-RPC over HTTPS 測試腳本
+│   ├─ configmap-agent-models.yaml    # 各 Agent LLM 模型設定
 │   ├─ deployment-root.yaml           # Root Agent Deployment（含 JSON-RPC feature flag）
 │   ├─ deployment-remote1.yaml        # Weather Agent Deployment
 │   ├─ deployment-remote2.yaml        # Train Agent Deployment
@@ -35,6 +37,37 @@ a2a-ds-cashflow-demo/
 │   └─ README.md
 └─ README.md
 ```
+
+## Agent LLM 模型設定
+
+為了讓每個 Agent 可以使用不同的模型，專案提供 `kubernetes/configmap-agent-models.yaml` 作為集中設定：
+
+```yaml
+data:
+  ROOT_LLM_PROVIDER: "bedrock"
+  ROOT_LLM_MODEL_ID: "anthropic.claude-3-opus-20240229-v1:0"
+  REMOTE1_MODEL_PROVIDER: "bedrock"
+  REMOTE1_MODEL_ID: "anthropic.claude-3-sonnet-20240229-v1:0"
+  REMOTE2_MODEL_PROVIDER: "bedrock"
+  REMOTE2_MODEL_ID: "anthropic.claude-3-haiku-20240307-v1:0"
+  SUMMARY_MODEL_PROVIDER: "bedrock"
+  SUMMARY_MODEL_ID: "anthropic.claude-3-haiku-20240307-v1:0"
+```
+
+步驟建議：
+
+1. 先套用 ConfigMap：
+
+   ```bash
+   kubectl apply -f kubernetes/configmap-agent-models.yaml
+   ```
+
+2. 根據環境需求修改上述 YAML 中的 Provider/Model ID。所有 Agent Deployment 會自動透過 `env.valueFrom.configMapKeyRef` 讀取對應鍵值：
+
+   - `deployment-root.yaml`：載入 Root Agent 自身與 Weather/Train/Summary Agent 的模型資訊，並在 `a2a.describe_agent` 回傳中展示。
+   - `deployment-remote1.yaml`、`deployment-remote2.yaml`、`deployment-summary.yaml`：個別注入 `LLM_PROVIDER` 與 `LLM_MODEL_ID` 環境變數。
+
+3. 若需為不同環境提供不同設定，可複製此 ConfigMap 檔案，並搭配 Helm/Kustomize 或 Terraform Kubernetes Provider 管理差異。更新後重新 `kubectl apply` 即可觸發滾動更新。
 
 ## JSON-RPC over HTTPS 架構與設定
 

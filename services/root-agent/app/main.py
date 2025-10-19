@@ -23,6 +23,22 @@ JSONRPC_PORT = int(os.environ.get("JSONRPC_PORT", PORT))
 SUMMARY_URL = os.environ.get("SUMMARY_URL", "http://summary-agent-service")
 REMOTE1_URL = os.environ.get("REMOTE1_URL", "http://remote-agent-1-service")
 REMOTE2_URL = os.environ.get("REMOTE2_URL", "http://remote-agent-2-service")
+ROOT_LLM_PROVIDER = os.environ.get("ROOT_LLM_PROVIDER", "bedrock")
+ROOT_LLM_MODEL_ID = os.environ.get(
+    "ROOT_LLM_MODEL_ID", "anthropic.claude-3-opus-20240229-v1:0"
+)
+REMOTE1_MODEL_PROVIDER = os.environ.get("REMOTE1_MODEL_PROVIDER", "bedrock")
+REMOTE1_MODEL_ID = os.environ.get(
+    "REMOTE1_MODEL_ID", "anthropic.claude-3-sonnet-20240229-v1:0"
+)
+REMOTE2_MODEL_PROVIDER = os.environ.get("REMOTE2_MODEL_PROVIDER", "bedrock")
+REMOTE2_MODEL_ID = os.environ.get(
+    "REMOTE2_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
+)
+SUMMARY_MODEL_PROVIDER = os.environ.get("SUMMARY_MODEL_PROVIDER", "bedrock")
+SUMMARY_MODEL_ID = os.environ.get(
+    "SUMMARY_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
+)
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -85,10 +101,23 @@ def build_agent_card() -> Dict[str, Any]:
             {"type": "eventbridge", "transport": "aws", "callback_queue": "sqs"},
         ],
         "capabilities": [
-            {"id": "task.dispatch.weather", "target": REMOTE1_URL},
-            {"id": "task.dispatch.train", "target": REMOTE2_URL},
-            {"id": "task.summarize", "target": SUMMARY_URL},
+            {
+                "id": "task.dispatch.weather",
+                "target": REMOTE1_URL,
+                "llm": {"provider": REMOTE1_MODEL_PROVIDER, "id": REMOTE1_MODEL_ID},
+            },
+            {
+                "id": "task.dispatch.train",
+                "target": REMOTE2_URL,
+                "llm": {"provider": REMOTE2_MODEL_PROVIDER, "id": REMOTE2_MODEL_ID},
+            },
+            {
+                "id": "task.summarize",
+                "target": SUMMARY_URL,
+                "llm": {"provider": SUMMARY_MODEL_PROVIDER, "id": SUMMARY_MODEL_ID},
+            },
         ],
+        "model": {"provider": ROOT_LLM_PROVIDER, "id": ROOT_LLM_MODEL_ID},
         "maintainer": {"team": "A2A Demo", "email": "a2a@example.com"},
     }
 
