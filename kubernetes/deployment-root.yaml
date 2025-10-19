@@ -22,12 +22,14 @@ spec:
         ports:
         - containerPort: 50000
         env:
-          # --- 遠端 Agent 連線配置 (保持不變) ---
-          - name: REMOTE1_URL
+          # --- 遠端 Agent 連線配置 ---
+          - name: REMOTE1_URL # Weather Agent (Agent A / 1)
             value: "http://remote-agent-1-service"
-          - name: REMOTE2_URL
+          - name: REMOTE2_URL # Train Agent (Agent B / 2)
             value: "http://remote-agent-2-service"
-            
+          - name: SUMMARY_URL # Summary Agent (Aggregator)
+            value: "http://summary-agent-service"
+
           # --- AWS & Checkpoint 配置 (新增/更新) ---
           - name: AWS_REGION
             value: "ap-southeast-1"
@@ -48,3 +50,13 @@ spec:
             value: "d-redis-sg-iqd4qt.serverless.apse1.cache.amazonaws.com"
           - name: REDIS_PORT
             value: "6379"
+
+          # --- JSON-RPC over HTTPS 測試開關 ---
+          - name: JSONRPC_ENABLED
+            value: "true"
+          - name: JSONRPC_BIND
+            value: "0.0.0.0"
+          - name: JSONRPC_PORT
+            value: "50000"
+          - name: JSONRPC_BASE_PATH
+            value: "/jsonrpc"

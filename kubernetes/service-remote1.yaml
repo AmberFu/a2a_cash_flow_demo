@@ -11,3 +11,4 @@ spec:
       port: 50001       # 🚨 Service 提供的 Port
       targetPort: 50001 # 🚨 容器實際運行的 Port
   type: ClusterIP
+

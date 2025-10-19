@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jsonrpc-gateway
+  namespace: a2a-demo
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-southeast-1:123456789012:certificate/placeholder
+    # 若交由 API Gateway 管理網域，可：
+    # 1. 移除 certificate-arn，改由 API Gateway (HTTP API / REST API) 終止 TLS；
+    # 2. 將此 Ingress 調整為 internal，並於 Terraform 透過 PrivateLink 或 VPC Link 將 API Gateway 指向 ALB。
+    external-dns.alpha.kubernetes.io/hostname: jsonrpc.example.com
+spec:
+  rules:
+    - host: jsonrpc.example.com
+      http:
+        paths:
+          - path: /jsonrpc
+            pathType: Prefix
+            backend:
+              service:
+                name: root-agent-jsonrpc
+                port:
+                  number: 50000
