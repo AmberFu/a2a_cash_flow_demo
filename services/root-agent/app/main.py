@@ -257,44 +257,51 @@ async def submit_hitl_answer(task_id: str, request: HITLAnswerRequest):
     return {"message": f"HITL answer for task {task_id} submitted and workflow resumed."}
 
 
-if JSONRPC_ENABLED:
-    @app.post(JSONRPC_BASE_PATH)
-    async def jsonrpc_endpoint(raw_request: Request):
-        """Handle JSON-RPC 2.0 calls for synchronous integrations."""
-        try:
-            payload = await raw_request.json()
-        except Exception:  # noqa: BLE001 - FastAPI already logs details
-            return jsonrpc_error(-32700, "Parse error", None)
+@app.post(JSONRPC_BASE_PATH)
+async def jsonrpc_endpoint(raw_request: Request):
+    """Handle JSON-RPC 2.0 calls for synchronous integrations."""
+    if not JSONRPC_ENABLED:
+        # 仍回應符合 JSON-RPC 2.0 規範的錯誤，以利客戶端診斷。
+        return jsonrpc_error(
+            -32000,
+            "JSON-RPC channel is currently disabled on the Root Agent.",
+            None,
+        )
 
-        if isinstance(payload, list):
-            return jsonrpc_error(-32600, "Batch requests are not supported", None)
+    try:
+        payload = await raw_request.json()
+    except Exception:  # noqa: BLE001 - FastAPI already logs details
+        return jsonrpc_error(-32700, "Parse error", None)
 
-        method = payload.get("method")
-        request_id = payload.get("id")
-        params = payload.get("params") or {}
-        if not method:
-            return jsonrpc_error(-32600, "method is required", request_id)
+    if isinstance(payload, list):
+        return jsonrpc_error(-32600, "Batch requests are not supported", None)
 
-        try:
-            result = await handle_jsonrpc_call(method, params)
-        except ValueError as exc:
-            return jsonrpc_error(-32602, str(exc), request_id)
-        except NotImplementedError as exc:
-            return jsonrpc_error(-32601, str(exc), request_id)
-        except HTTPException as exc:
-            return JSONResponse(
-                status_code=exc.status_code,
-                content={
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32000, "message": exc.detail},
-                    "id": request_id,
-                },
-            )
-        except Exception as exc:  # pragma: no cover - runtime safety
-            logger.exception("Unhandled JSON-RPC error: %s", exc)
-            return jsonrpc_error(-32603, "Internal error", request_id)
+    method = payload.get("method")
+    request_id = payload.get("id")
+    params = payload.get("params") or {}
+    if not method:
+        return jsonrpc_error(-32600, "method is required", request_id)
 
-        return {"jsonrpc": "2.0", "result": result, "id": request_id}
+    try:
+        result = await handle_jsonrpc_call(method, params)
+    except ValueError as exc:
+        return jsonrpc_error(-32602, str(exc), request_id)
+    except NotImplementedError as exc:
+        return jsonrpc_error(-32601, str(exc), request_id)
+    except HTTPException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "jsonrpc": "2.0",
+                "error": {"code": -32000, "message": exc.detail},
+                "id": request_id,
+            },
+        )
+    except Exception as exc:  # pragma: no cover - runtime safety
+        logger.exception("Unhandled JSON-RPC error: %s", exc)
+        return jsonrpc_error(-32603, "Internal error", request_id)
+
+    return {"jsonrpc": "2.0", "result": result, "id": request_id}
 
 
 if __name__ == "__main__":
