@@ -44,6 +44,29 @@ if [[ -n "$DEPLOY_JSONRPC_ENABLED" && "$DEPLOY_JSONRPC_ENABLED" != "true" && "$D
   echo "⚠️  偵測到 Deployment 中 JSONRPC_ENABLED=$DEPLOY_JSONRPC_ENABLED，請確認已於 Kubernetes Deployment 內開啟 JSON-RPC 功能。"
 fi
 
+# 重新正規化 JSON-RPC Path，確保至少包含前導斜線並避免重複斜線導致 404。
+JSONRPC_SANITIZED_PATH=$(INPUT_PATH="$DEPLOY_JSONRPC_PATH" python - <<'PY'
+import os
+
+path = os.environ.get("INPUT_PATH", "").strip()
+if not path:
+    path = "/jsonrpc"
+if not path.startswith("/"):
+    path = "/" + path
+canonical = path.rstrip("/") or "/"
+paths = [canonical]
+if canonical != "/":
+    paths.append(canonical + "/")
+print("|".join(paths))
+PY
+)
+
+IFS='|' read -r -a JSONRPC_PATH_CANDIDATES <<<"$JSONRPC_SANITIZED_PATH"
+# 追加預設 /jsonrpc 以避免部署尚未更新環境變數時測試失敗
+if [[ " ${JSONRPC_PATH_CANDIDATES[*]} " != *" /jsonrpc "* ]]; then
+  JSONRPC_PATH_CANDIDATES+=("/jsonrpc")
+fi
+
 echo "[3/5] 透過 port-forward 驗證叢集內 HTTP 流量"
 kubectl rollout status -n "$K8S_NAMESPACE" deploy/root-agent --timeout=60s
 kubectl port-forward -n "$K8S_NAMESPACE" "svc/${JSONRPC_SERVICE_NAME}" "${LOCAL_PORT}:${DEPLOY_JSONRPC_PORT}" >/tmp/jsonrpc_port_forward.log 2>&1 &
@@ -69,16 +92,44 @@ if ! grep -q "Forwarding from" /tmp/jsonrpc_port_forward.log; then
   exit 1
 fi
 
-echo "  - 呼叫 a2a.describe_agent"
-python services/jsonrpc_gateway/client.py \
-  --endpoint "http://127.0.0.1:${LOCAL_PORT}${DEPLOY_JSONRPC_PATH}" \
-  --method a2a.describe_agent
+call_jsonrpc_client() {
+  local endpoint="$1"
+  local method="$2"
+  local params="${3:-}"
 
-echo "  - 呼叫 a2a.submit_task"
-python services/jsonrpc_gateway/client.py \
-  --endpoint "http://127.0.0.1:${LOCAL_PORT}${DEPLOY_JSONRPC_PATH}" \
-  --method a2a.submit_task \
-  --params '{"payload": {"loan_case_id": "jsonrpc-trial"}}'
+  if [[ -n "$params" ]]; then
+    python services/jsonrpc_gateway/client.py \
+      --endpoint "$endpoint" \
+      --method "$method" \
+      --params "$params"
+  else
+    python services/jsonrpc_gateway/client.py \
+      --endpoint "$endpoint" \
+      --method "$method"
+  fi
+}
+
+SUCCESS_PATH=""
+for candidate_path in "${JSONRPC_PATH_CANDIDATES[@]}"; do
+  endpoint="http://127.0.0.1:${LOCAL_PORT}${candidate_path}"
+  echo "  - 嘗試呼叫 a2a.describe_agent (endpoint: $endpoint)"
+  if call_jsonrpc_client "$endpoint" a2a.describe_agent; then
+    SUCCESS_PATH="$candidate_path"
+    break
+  fi
+  echo "    ⚠️  端點 $endpoint 呼叫失敗，嘗試下一個候選路徑"
+done
+
+if [[ -z "$SUCCESS_PATH" ]]; then
+  echo "❌ 無法透過任何候選 JSON-RPC Path 呼叫 a2a.describe_agent，請確認 Root Agent 映像或環境變數是否已更新。"
+  echo "   候選路徑: ${JSONRPC_PATH_CANDIDATES[*]}"
+  echo "   Port-forward log:"
+  cat /tmp/jsonrpc_port_forward.log
+  exit 1
+fi
+
+echo "  - 呼叫 a2a.submit_task (endpoint: http://127.0.0.1:${LOCAL_PORT}${SUCCESS_PATH})"
+call_jsonrpc_client "http://127.0.0.1:${LOCAL_PORT}${SUCCESS_PATH}" a2a.submit_task '{"payload": {"loan_case_id": "jsonrpc-trial"}}'
 
 echo "[4/5] （選擇性）測試公開 HTTPS 入口"
 if [[ -n "$JSONRPC_PUBLIC_ENDPOINT" ]]; then
