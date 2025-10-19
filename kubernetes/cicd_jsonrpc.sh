@@ -24,20 +24,59 @@ aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
 echo "[2/5] 套用 JSON-RPC 專用 Service"
 kubectl apply -f kubernetes/service-jsonrpc.yaml
 
+# 讀取 Deployment 中 JSON-RPC 相關設定，若未設定則採用預設值
+CONTAINER_NAME=${CONTAINER_NAME:-root-agent-container}
+DEPLOY_JSONRPC_PATH=$(kubectl get deploy -n "$K8S_NAMESPACE" root-agent -o \
+  jsonpath='{range .spec.template.spec.containers[?(@.name=="'"$CONTAINER_NAME"'")].env[?(@.name=="JSONRPC_BASE_PATH")]}{.value}{end}' 2>/dev/null || true)
+DEPLOY_JSONRPC_PORT=$(kubectl get deploy -n "$K8S_NAMESPACE" root-agent -o \
+  jsonpath='{range .spec.template.spec.containers[?(@.name=="'"$CONTAINER_NAME"'")].env[?(@.name=="JSONRPC_PORT")]}{.value}{end}' 2>/dev/null || true)
+DEPLOY_JSONRPC_ENABLED=$(kubectl get deploy -n "$K8S_NAMESPACE" root-agent -o \
+  jsonpath='{range .spec.template.spec.containers[?(@.name=="'"$CONTAINER_NAME"'")].env[?(@.name=="JSONRPC_ENABLED")]}{.value}{end}' 2>/dev/null || true)
+
+if [[ -z "$DEPLOY_JSONRPC_PATH" ]]; then
+  DEPLOY_JSONRPC_PATH="$JSONRPC_PATH"
+fi
+if [[ -z "$DEPLOY_JSONRPC_PORT" ]]; then
+  DEPLOY_JSONRPC_PORT="50000"
+fi
+
+if [[ -n "$DEPLOY_JSONRPC_ENABLED" && "$DEPLOY_JSONRPC_ENABLED" != "true" && "$DEPLOY_JSONRPC_ENABLED" != "True" ]]; then
+  echo "⚠️  偵測到 Deployment 中 JSONRPC_ENABLED=$DEPLOY_JSONRPC_ENABLED，請確認已於 Kubernetes Deployment 內開啟 JSON-RPC 功能。"
+fi
+
 echo "[3/5] 透過 port-forward 驗證叢集內 HTTP 流量"
-kubectl port-forward -n "$K8S_NAMESPACE" "svc/${JSONRPC_SERVICE_NAME}" "${LOCAL_PORT}:50000" >/tmp/jsonrpc_port_forward.log 2>&1 &
+kubectl rollout status -n "$K8S_NAMESPACE" deploy/root-agent --timeout=60s
+kubectl port-forward -n "$K8S_NAMESPACE" "svc/${JSONRPC_SERVICE_NAME}" "${LOCAL_PORT}:${DEPLOY_JSONRPC_PORT}" >/tmp/jsonrpc_port_forward.log 2>&1 &
 PF_PID=$!
 trap 'kill $PF_PID 2>/dev/null || true' EXIT
-sleep 5
+
+# 等待 port-forward 建立連線
+for _ in {1..10}; do
+  if grep -q "Forwarding from" /tmp/jsonrpc_port_forward.log; then
+    break
+  fi
+  if ! kill -0 $PF_PID 2>/dev/null; then
+    echo "❌ port-forward 已終止，log 如下："
+    cat /tmp/jsonrpc_port_forward.log
+    exit 1
+  fi
+  sleep 1
+done
+
+if ! grep -q "Forwarding from" /tmp/jsonrpc_port_forward.log; then
+  echo "❌ 無法建立 port-forward，log 如下："
+  cat /tmp/jsonrpc_port_forward.log
+  exit 1
+fi
 
 echo "  - 呼叫 a2a.describe_agent"
 python services/jsonrpc_gateway/client.py \
-  --endpoint "http://127.0.0.1:${LOCAL_PORT}${JSONRPC_PATH}" \
+  --endpoint "http://127.0.0.1:${LOCAL_PORT}${DEPLOY_JSONRPC_PATH}" \
   --method a2a.describe_agent
 
 echo "  - 呼叫 a2a.submit_task"
 python services/jsonrpc_gateway/client.py \
-  --endpoint "http://127.0.0.1:${LOCAL_PORT}${JSONRPC_PATH}" \
+  --endpoint "http://127.0.0.1:${LOCAL_PORT}${DEPLOY_JSONRPC_PATH}" \
   --method a2a.submit_task \
   --params '{"payload": {"loan_case_id": "jsonrpc-trial"}}'
 
