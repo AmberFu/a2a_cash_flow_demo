@@ -5,42 +5,113 @@
 ```md
 a2a-ds-cashflow-demo/
 ├─ services/
-│  ├─ root-agent/
-│  │  ├─ app/
-│  │  │  ├─ main.py
-│  │  │  └─ a2a/
-│  │  │     ├─ graph.py
-│  │  │     └─ tools.py
-│  │  ├─ Dockerfile
-│  │  └─ requirements.txt
-│  ├─ remote-agent-1/
-│  │  ├─ app/
-│  │  │  ├─ main.py
-│  │  │  └─ a2a/
-│  │  │     ├─ graph.py
-│  │  │     └─ tools.py
-│  │  ├─ Dockerfile
-│  │  └─ requirements.txt
-│  └─ remote-agent-2/
-│     ├─ app/
-│     │  ├─ main.py
-│     │  └─ a2a/
-│     │     ├─ graph.py
-│     │     └─ tools.py
-│     ├─ Dockerfile
-│     └─ requirements.txt
-├─ terraform/
-│  ├─ main.tf
-│  └─ variables.tf
+│  ├─ root-agent/
+│  │  ├─ app/
+│  │  │  ├─ main.py
+│  │  │  └─ a2a/
+│  │  │     ├─ graph.py
+│  │  │     └─ tools.py
+│  │  ├─ Dockerfile
+│  │  └─ requirements.txt
+│  ├─ remote-agent-weather/
+│  │  ├─ app/
+│  │  │  ├─ main.py
+│  │  │  └─ a2a/
+│  │  │     └─ handlers.py
+│  │  ├─ Dockerfile
+│  │  └─ requirements.txt
+│  ├─ remote-agent-train/
+│  │  ├─ app/
+│  │  │  ├─ main.py
+│  │  │  └─ a2a/
+│  │  │     └─ handlers.py
+│  │  ├─ Dockerfile
+│  │  └─ requirements.txt
+│  └─ summary-agent/
+│     ├─ app/
+│     │  ├─ main.py
+│     │  └─ a2a/
+│     │     └─ handlers.py
+│     ├─ Dockerfile
+│     └─ requirements.txt
+├─ terraform/ (完成)
+│  ├─ main.tf
+│  ├─ terraform.tfvars
+│  └─ variables.tf
 ├─ kubernetes/
-│  ├─ namespace.yaml
-│  ├─ deployment-root.yaml
-│  ├─ service-root.yaml
-│  ├─ deployment-remote1.yaml
-│  ├─ service-remote1.yaml
-│  ├─ deployment-remote2.yaml
-│  └─ service-remote2.yaml
+│  ├─ namespace.yaml
+│  ├─ deployment-root.yaml
+│  ├─ service-root.yaml
+│  ├─ deployment-weather.yaml
+│  ├─ service-weather.yaml
+│  ├─ deployment-train.yaml
+│  ├─ service-train.yaml
+│  ├─ deployment-summary.yaml
+│  └─ service-summary.yaml
 └─ README.md
+```
+
+
+專案流程：
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Root Agent
+    participant EventBridge
+    participant Weather Agent
+    participant Train Agent
+    participant Summary Agent
+    participant HITL as "HITL (Human Reviewer)"
+
+    User->>+Root Agent: 發起請求 (例如：查詢明天去高雄，預算1000元)
+    Root Agent->>Root Agent: 建立 Task，儲存初始狀態 (LangGraph)
+    
+    %% -- 平行分派任務 --
+    Root Agent->>+EventBridge: 發送 "Task.GetWeather" 事件
+    EventBridge-->>Weather Agent: (via SQS) 路由事件
+    deactivate EventBridge
+
+    Root Agent->>+EventBridge: 發送 "Task.GetTrainSchedule" 事件
+    EventBridge-->>Train Agent: (via SQS) 路由事件
+    deactivate EventBridge
+    
+    Note right of Root Agent: Graph 進入等待 (interrupt) 狀態
+
+    %% -- 遠端 Agent 處理與回呼 --
+    Weather Agent->>Weather Agent: 處理任務 (查詢天氣)
+    Weather Agent-->>Root Agent: (via SQS Callback Queue) 回報天氣資訊
+    
+    Train Agent->>Train Agent: 處理任務 (查詢火車時刻)
+    Train Agent-->>Root Agent: (via SQS Callback Queue) 回報火車時刻
+    
+    %% -- 聚合與 HITL 判斷 --
+    Root Agent->>Root Agent: 收到回呼，更新 Graph 狀態
+    Note right of Root Agent: LangGraph Router 檢查是否<br/>所有前置任務 (天氣、火車) 都已完成
+
+    alt 資訊不足，需要 HITL
+        Root Agent->>HITL: 發出 HITL 請求：補充/確認關鍵資訊
+        Note right of Root Agent: Graph 進入等待 (interrupt) 狀態
+        HITL-->>Root Agent: 人工回覆（補件/決策）
+        Root Agent->>Root Agent: 併入 HITL 回覆並更新狀態
+    else 資訊充分，無需 HITL
+        Note right of Root Agent: 自動流程繼續
+    end
+    
+    %% -- 繼續分派總結任務 --
+    Root Agent->>+EventBridge: 發送 "Task.Summarize" 事件 (附上天氣、火車與可能的 HITL 補充)
+    EventBridge-->>Summary Agent: (via SQS) 路由事件
+    deactivate EventBridge
+    
+    Note right of Root Agent: Graph 再次進入等待狀態
+
+    %% -- 最終總結與結束 --
+    Summary Agent->>Summary Agent: 處理任務 (根據預算、天氣、交通提出建議)
+    Summary Agent-->>Root Agent: (via SQS Callback Queue) 回報最終建議
+    
+    Root Agent->>Root Agent: 收到最終回呼，更新狀態為 "completed"
+    Root Agent-->>User: 回傳最終結果
+
 ```
 
 ## Pre-request
@@ -91,12 +162,6 @@ a2a-ds-cashflow-demo/
   ```
 
 - 建立 namespace - 目前是士齊協助完成
-
-
-- 
-
-
-
 
 
 ### 使用 Terraform 定義和佈署 DynamoDB
@@ -288,40 +353,3 @@ ps. 通常後續需要設定 AWS 認證，但因為在 SegeMaker Studio，所以
     a2a_tasks_table_arn = "arn:aws:dynamodb:ap-southeast-1:182399696164:table/ds_demo_a2a_tasks"
     ```
 
-- 
-
-
-
-### Test A2A with Human-In-The-Loop (HITL)
-
-```mermaid
-sequenceDiagram
-  autonumber
-  participant Client as User/System
-  participant Root as Root Agent (EKS/Lambda)
-  participant Store as Memory Store (Redis/DDB/S3)
-  participant Ext as Remote Agent (3rd party, HTTPS)
-
-  Client->>Root: task(input)
-  Root->>Store: load short_term / long_term memory
-  Root->>Ext: POST /a2a/invoke (envelope + idempotency_key + auth)
-  alt quick result
-    Ext-->>Root: 200 {status: "SUCCEEDED", output, memory_patch}
-    Root->>Store: apply memory_patch & persist
-    Root-->>Client: final output
-  else slow/async
-    Ext-->>Root: 202 {ticket, eta, callback_url?}
-    alt remote-callback
-      Ext-->>Root: POST /a2a/callback {ticket, output, memory_patch}
-      Root->>Store: persist memory_patch
-      Root-->>Client: final output
-    else polling
-      loop until done/timeout
-        Root->>Ext: GET /a2a/result?ticket=...
-        Ext-->>Root: {status, output?}
-      end
-      Root-->>Client: final output
-    end
-  end
-
-```
