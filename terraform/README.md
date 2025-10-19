@@ -110,15 +110,14 @@ root_agent_sa_role_arn = "arn:aws:iam::***************:role/ds-a2a-root-agent-sa
 ## JSON-RPC over HTTPS 與 AWS 元件整合指引
 
 ### EKS + ALB (ELBv2) + ACM 憑證
-* **Kubernetes Service**：`kubernetes/service-jsonrpc.yaml` 會針對 Root Agent 建立額外的 ClusterIP，讓 ALB Ingress Controller 能把 HTTPS 流量導向現有的 50000 埠（Pod 內部仍維持 HTTP）。
-* **Kubernetes Ingress**：`kubernetes/ingress-jsonrpc.yaml` 透過 `alb.ingress.kubernetes.io/*` 註解要求 ALB 建立 HTTPS Listener；`certificate-arn` 指向 ACM 憑證即可完成 TLS 終止。ALB 與 EKS 的關係僅止於 Ingress Controller 代為建立 AWS Load Balancer 與 Target Group，內部 Pod 不需要額外修改。 
+* **Kubernetes Service**：`kubernetes/service-jsonrpc.yaml` 會針對 Root Agent 建立額外的 ClusterIP，提供穩定的 Pod-to-Pod DNS，供 Root Agent JSON-RPC 端點在叢集內被呼叫或供 `kubectl port-forward` 測試使用。 
 * **Terraform 控制點**：
   - ACM 憑證可以在 `terraform/main.tf` 內以 `aws_acm_certificate` 與 `aws_acm_certificate_validation` 管理，再將 ARN 透過 `locals` 或 `kubernetes_ingress` 資源帶入。
-  - 若採用 AWS Load Balancer Controller，Terraform 可以用 `kubernetes_manifest` 或 `helm_release` 安裝 Controller，並透過 `kubernetes_ingress` 將 `ingress-jsonrpc.yaml` 的設定模組化。
+  - 若採用 AWS Load Balancer Controller，Terraform 可以用 `kubernetes_manifest` 或 `helm_release` 安裝 Controller，並透過 `kubernetes_ingress` 宣告自訂的 Ingress 設定（包含 `certificate-arn`、`ssl-redirect` 等註解）。
 
 ### EKS + API Gateway
-* 若希望由 **API Gateway** 提供自訂網域、WAF 或節流等能力，可將 JSON-RPC Ingress 的 `certificate-arn` 移除，將 ALB 當成 Private NLB/ALB，再透過 API Gateway HTTP API 的 **VPC Link** 對接。TLS 終止由 API Gateway 的自訂網域或預設網域負責，EKS 僅需暴露 HTTP。
-* Terraform 可使用 `aws_apigatewayv2_api`、`aws_apigatewayv2_vpc_link`、`aws_apigatewayv2_integration` 等資源，把 API Gateway 指向 Kubernetes Ingress 所建立的 ALB DNS；之後再透過 `aws_apigatewayv2_stage` 與 `aws_apigatewayv2_domain_name` 完成部署。
+* 若希望由 **API Gateway** 提供自訂網域、WAF 或節流等能力，可將 選擇的對外入口（例如 Ingress 或 NLB）的 `certificate-arn` 移除，將 ALB 當成 Private NLB/ALB，再透過 API Gateway HTTP API 的 **VPC Link** 對接。TLS 終止由 API Gateway 的自訂網域或預設網域負責，EKS 僅需暴露 HTTP。
+* Terraform 可使用 `aws_apigatewayv2_api`、`aws_apigatewayv2_vpc_link`、`aws_apigatewayv2_integration` 等資源，把 API Gateway 指向 所建立的私有 Load Balancer DNS；之後再透過 `aws_apigatewayv2_stage` 與 `aws_apigatewayv2_domain_name` 完成部署。
 
 ### EKS + 傳統 ELB (Classic / NLB)
 * 若只需要 L4 負載平衡，也可以將 Service type 改為 `LoadBalancer` 並設定 `service.beta.kubernetes.io/aws-load-balancer-type: nlb-ip`。TLS 可在 NLB 上使用 **TLS Listener + Target Group**，或直接在 Pod 內使用 `server.py` 的 TLS 選項，這樣流量會以端到端 HTTPS 傳遞。

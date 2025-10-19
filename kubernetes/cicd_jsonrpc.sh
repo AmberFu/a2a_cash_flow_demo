@@ -21,9 +21,8 @@ banner "JSON-RPC 2.0 over HTTPS 測試流程"
 echo "[1/5] 更新 kubeconfig ($EKS_CLUSTER_NAME)"
 aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
 
-echo "[2/5] 套用 JSON-RPC 專用 Service / Ingress"
+echo "[2/5] 套用 JSON-RPC 專用 Service"
 kubectl apply -f kubernetes/service-jsonrpc.yaml
-kubectl apply -f kubernetes/ingress-jsonrpc.yaml
 
 echo "[3/5] 透過 port-forward 驗證叢集內 HTTP 流量"
 kubectl port-forward -n "$K8S_NAMESPACE" "svc/${JSONRPC_SERVICE_NAME}" "${LOCAL_PORT}:50000" >/tmp/jsonrpc_port_forward.log 2>&1 &

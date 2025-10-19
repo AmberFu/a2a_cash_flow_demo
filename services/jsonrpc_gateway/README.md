@@ -48,8 +48,7 @@ python services/jsonrpc_gateway/client.py \
 
 ## 與 Kubernetes / Terraform 的對應
 
-* `kubernetes/service-jsonrpc.yaml`：建立 ClusterIP Service，將 `app: root-agent` Pod 換成穩定的 DNS（`root-agent-jsonrpc.a2a-demo.svc.cluster.local`），供 Ingress、API Gateway VPC Link 或 Service Mesh 指向。
-* `kubernetes/ingress-jsonrpc.yaml`：產生 ALB 與 Listener，預設由 ALB 終止 TLS；若要交由 API Gateway 管網域，可把 Ingress 改為 `alb.ingress.kubernetes.io/scheme: internal`，於 Terraform 中建立 `aws_apigatewayv2_vpc_link` / `aws_apigatewayv2_integration` 指向 ALB，TLS 憑證即由 API Gateway 管理。
+* `kubernetes/service-jsonrpc.yaml`：建立 ClusterIP Service，將 `app: root-agent` Pod 換成穩定的 DNS（`root-agent-jsonrpc.a2a-demo.svc.cluster.local`），供叢集內其他 Pod 或測試 port-forward 直接呼叫 `/jsonrpc`。
 * `terraform/README.md`：說明如何在 Terraform 控制 ACM、ALB、API Gateway、Route53 等元件，仍維持單一事實來源。
 
 您可以依據實際情況將 `server.py` 直接包入 Root Agent 映像，或把既有 Root Agent 改成支援 JSON-RPC 的 HTTP 介面（本專案已示範如何在 FastAPI 中新增 `/jsonrpc` 路徑）。若保留 EventBridge + SQS，則同時具備同步（JSON-RPC）與非同步（EventBridge/SQS）兩種路徑。

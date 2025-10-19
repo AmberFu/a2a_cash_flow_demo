@@ -24,9 +24,8 @@ a2a-ds-cashflow-demo/
 │   ├─ deployment-remote1.yaml        # Weather Agent Deployment
 │   ├─ deployment-remote2.yaml        # Train Agent Deployment
 │   ├─ deployment-summary.yaml        # Summary Agent Deployment
-│   ├─ ingress-jsonrpc.yaml           # AWS ALB Ingress for JSON-RPC over HTTPS
 │   ├─ namespace.yaml
-│   ├─ service-jsonrpc.yaml           # Root Agent JSON-RPC 專用 ClusterIP（Ingress / VPC Link 導流）
+│   ├─ service-jsonrpc.yaml           # Root Agent JSON-RPC 專用 ClusterIP（Pod-to-Pod / 內部測試）
 │   ├─ service-root.yaml              # Root Agent 內部 ClusterIP（EventBridge/SQS 回呼）
 │   ├─ service-remote1.yaml
 │   ├─ service-remote2.yaml
@@ -39,11 +38,12 @@ a2a-ds-cashflow-demo/
 
 ## JSON-RPC over HTTPS 架構與設定
 
-* `kubernetes/service-jsonrpc.yaml`：在叢集中建立指向 Root Agent Pod 的 `ClusterIP` Service，標記為 `app: root-agent` 與 `component: jsonrpc`。這個 Service 提供一個穩定的 DNS (`root-agent-jsonrpc.a2a-demo.svc.cluster.local`)，讓 Ingress、API Gateway VPC Link 或其他控制器可以導流到 Root Agent 的 `/jsonrpc` 端點。
-* `kubernetes/ingress-jsonrpc.yaml`：透過 AWS Load Balancer Controller 建立 ALB。預設啟用 HTTPS (443) 與 SSL redirect，負責在邊緣層處理 TLS。若要交給 API Gateway 管理網域，可將 Ingress `alb.ingress.kubernetes.io/scheme` 改為 `internal`，再由 API Gateway 透過 VPC Link 指向 ALB；或完全移除 Ingress，改以 API Gateway 直連 NodePort/NLB。
+* `kubernetes/service-jsonrpc.yaml`：在叢集中建立指向 Root Agent Pod 的 `ClusterIP` Service，標記為 `app: root-agent` 與 `component: jsonrpc`。這個 Service 提供一個穩定的 DNS (`root-agent-jsonrpc.a2a-demo.svc.cluster.local`)，讓 JSON-RPC 請求可以在叢集內（Pod-to-Pod）直接呼叫 Root Agent 的 `/jsonrpc` 端點，也方便透過 `kubectl port-forward` 在測試時對 Root Agent 發送請求。
 * `services/jsonrpc_gateway/`：提供 JSON-RPC 伺服器與客戶端範例程式碼，協助驗證同步通道。同一資料夾的 README 說明如何準備測試憑證（`jsonrpc.crt`/`jsonrpc.key`）與執行測試腳本。
 
-### 取得並設定 certificate-arn 與 hostname
+### 取得並設定 certificate-arn 與 hostname（選用）
+
+> 預設情境僅需叢集內部的 Pod-to-Pod 溝通，因此不需要額外的 Ingress 或負載平衡器。若未來要把 JSON-RPC 介面對外暴露，可依下列步驟延伸部署：
 
 1. **尋找或申請 ACM 憑證**
    * 透過 AWS ACM 主控台或 CLI 申請/匯入網域憑證：
@@ -57,16 +57,15 @@ a2a-ds-cashflow-demo/
      ```bash
      aws acm list-certificates --region ap-southeast-1 --query 'CertificateSummaryList[].{DomainName:DomainName,Arn:CertificateArn}'
      ```
-   * 在 Terraform 中也可以使用 `data "aws_acm_certificate"` 擷取既有憑證，並透過 `kubernetes_manifest` 或 Helm 將 ARN 注入 Ingress annotation。
+   * 在 Terraform 中也可以使用 `data "aws_acm_certificate"` 擷取既有憑證，將 ARN 注入自訂的 Ingress、API Gateway 或 Load Balancer 設定。
 
-2. **設定 Ingress**
-   * 將 `kubernetes/ingress-jsonrpc.yaml` 中的 `alb.ingress.kubernetes.io/certificate-arn` 改成實際的 ACM ARN。
-   * `external-dns.alpha.kubernetes.io/hostname` 與 `spec.rules[].host` 需對應您要綁定的 DNS。若已安裝 ExternalDNS，會根據這個欄位自動建立/更新 Route53 記錄。
-   * 如果使用 API Gateway 管網域，Ingress 可以維持 `internal` 並省略 `certificate-arn`；TLS 將由 API Gateway 管理，Ingress 只需提供目標 ALB。
+2. **選擇對外入口**
+   * **Kubernetes Ingress / AWS Load Balancer Controller**：自行建立 Ingress YAML 或使用 Helm chart，指定 `alb.ingress.kubernetes.io/certificate-arn`、`external-dns.alpha.kubernetes.io/hostname` 等註解，即可讓 ALB 終止 TLS。
+   * **API Gateway + VPC Link**：維持 Service 為 ClusterIP，另外以 Terraform 建立 `aws_apigatewayv2_vpc_link`、`aws_apigatewayv2_integration` 指向該 Service 所對應的內部 Load Balancer，TLS 由 API Gateway 處理。
+   * **Service type=LoadBalancer / NLB**：將 Service 改為 `LoadBalancer` 類型，利用 AWS NLB or CLB 提供對外入口。
 
 3. **Terraform 控制**
-   * 可以在 `terraform/main.tf` 新增變數（例如 `var.jsonrpc_certificate_arn`、`var.jsonrpc_hostname`），再透過 `kubectl_manifest` 或 Helm chart 將值套用到 Ingress/Service。這樣可確保憑證 ARN、主機名稱等設定由 Terraform 統一管理。
-   * 若使用 AWS API Gateway + VPC Link，也可在 Terraform 建立 `aws_apigatewayv2_vpc_link` 與 `aws_apigatewayv2_integration`，將 JSON-RPC 流量導向 ALB Listener，並在 API Gateway 管理 HTTPS 憑證與自訂網域。
+   * 建議將憑證 ARN、網域、對外入口類型寫成變數，並透過 Terraform 的 Kubernetes Provider 或 AWS Provider 管理，避免手動 drift。
 
 
 ## Pre-request

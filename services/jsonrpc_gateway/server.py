@@ -7,7 +7,7 @@
 
 實務部署時建議：
 * 在容器啟動腳本中掛載 ACM/自簽憑證，或改由 ALB/NLB/API Gateway 終止 TLS。
-* 搭配 `kubernetes/service-jsonrpc.yaml` 與 `kubernetes/ingress-jsonrpc.yaml` 將流量導入 Root Agent。
+* 搭配 `kubernetes/service-jsonrpc.yaml` 讓叢集內其他 Pod（或透過 `kubectl port-forward` 的測試流程）將流量導入 Root Agent。
 """
 from __future__ import annotations
 
