@@ -10,6 +10,7 @@ a2a-ds-cashflow-demo/
 │   │   ├─ server.py
 │   │   └─ README.md
 │   ├─ remote-agent-1/                # Weather Agent (agent 1)
+│   ├─ remote-agent-weather/          # Deterministic Weather Agent with advisory API
 │   ├─ remote-agent-2/                # Train Agent (agent 2)
 │   ├─ summary-agent/                 # Summary Agent（彙整 Weather/Train 結果）
 │   └─ root-agent/                    # Root Agent FastAPI 應用，支援 JSON-RPC 與 EventBridge/SQS
