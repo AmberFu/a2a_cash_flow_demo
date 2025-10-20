@@ -35,88 +35,113 @@ docker push ${ECR_IMAGE}:${VERSION_TAG}
 echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
 
 
-# # --- 3. Remote Agent 1 處理 - create ECR image ---
-# AGENT_NAME="a2a_demo_remote_agent1"
-# ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
-# echo "--- Building $AGENT_NAME ---"
-# docker build -f services/remote-agent-1/Dockerfile -t ${AGENT_NAME}:${VERSION_TAG} services/remote-agent-1 --network sagemaker
-# docker tag ${AGENT_NAME}:${VERSION_TAG} ${ECR_IMAGE}:${VERSION_TAG}
-# docker push ${ECR_IMAGE}:${VERSION_TAG}
-# echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
+# --- 3. Remote Agent 1 處理 - create ECR image ---
+AGENT_NAME="a2a_demo_remote_agent1"
+ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
+echo "--- Building $AGENT_NAME ---"
+docker build -f services/remote-agent-1/Dockerfile -t ${AGENT_NAME}:${VERSION_TAG} services/remote-agent-1 --network sagemaker
+docker tag ${AGENT_NAME}:${VERSION_TAG} ${ECR_IMAGE}:${VERSION_TAG}
+docker push ${ECR_IMAGE}:${VERSION_TAG}
+echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
 
 
-# # --- 4. Remote Agent 2 處理 - create ECR image ---
-# AGENT_NAME="a2a_demo_remote_agent2"
-# ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
-# echo "--- Building $AGENT_NAME ---"
-# docker build -f services/remote-agent-2/Dockerfile -t ${AGENT_NAME}:${VERSION_TAG} services/remote-agent-2 --network sagemaker
-# docker tag ${AGENT_NAME}:${VERSION_TAG} ${ECR_IMAGE}:${VERSION_TAG}
-# docker push ${ECR_IMAGE}:${VERSION_TAG}
-# echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
+# --- 4. Remote Agent 2 處理 - create ECR image ---
+AGENT_NAME="a2a_demo_remote_agent2"
+ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
+echo "--- Building $AGENT_NAME ---"
+docker build -f services/remote-agent-2/Dockerfile -t ${AGENT_NAME}:${VERSION_TAG} services/remote-agent-2 --network sagemaker
+docker tag ${AGENT_NAME}:${VERSION_TAG} ${ECR_IMAGE}:${VERSION_TAG}
+docker push ${ECR_IMAGE}:${VERSION_TAG}
+echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
+
+
+# --- 5. Summary Agent 處理 - create ECR image ---
+AGENT_NAME="a2a_demo_summary_agent"
+ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
+echo "--- Building $AGENT_NAME ---"
+docker build -f services/summary-agent/Dockerfile -t ${AGENT_NAME}:${VERSION_TAG} services/summary-agent --network sagemaker
+docker tag ${AGENT_NAME}:${VERSION_TAG} ${ECR_IMAGE}:${VERSION_TAG}
+docker push ${ECR_IMAGE}:${VERSION_TAG}
+echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
 
 
 # --- CD 部分：更新 Kubernetes YAML 與部署 ---
 ## 說明：此階段連接到 EKS 叢集，更新 Deployment YAML 檔案中的映像標籤，並應用部署。
 
-echo "--- 5. Configure Kubeconfig ---"
+echo "--- 6. Configure Kubeconfig ---"
 aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
 echo "=== Kubeconfig Updated! ==="
 
-# # --- 6. 自動更新 Deployment YAML 映像標籤 ---
-# # 使用 sed 替換 Deployment 檔案中的映像標籤，確保使用剛剛推送的 $VERSION_TAG
-# # 假設您的 YAML 檔案中的映像標籤目前是 :latest 或 :placeholder
-# # 範例：更新 Root Agent 部署
-# ROOT_YAML="kubernetes/deployment-root.yaml"
-# ROOT_ECR_FULL="${ECR_BASE}/a2a_demo_root_agent"
-# echo "Updating $ROOT_YAML with image tag: ${ROOT_ECR_FULL}:${VERSION_TAG}"
-# # 這裡假設您在 YAML 檔案中是以特定的行或字串標識映像。
-# # 更安全的做法是使用 kustomize 或 helm，但這裡用 sed 實現簡單替換。
-# # 假設您 YAML 中是這樣： image: 182399696164.dkr.ecr.ap-southeast-1.amazonaws.com/image/a2a_demo_root_agent:latest
-# sed -i "s|a2a_demo_root_agent:latest|a2a_demo_root_agent:${VERSION_TAG}|g" $ROOT_YAML
-# kubectl apply -f $ROOT_YAML
-# kubectl apply -f kubernetes/service-root.yaml
-# kubectl rollout restart deployment root-agent -n $K8S_NAMESPACE
+# --- 6. 自動更新 Deployment 映像標籤並部署 (使用 kubectl set image) ---
 
-# --- 6. 自動更新 Deployment YAML 映像標籤 (修正 sed 替換邏輯) ---
+# 設置變數
+AGENT_NAME="a2a_demo_root_agent"
+ROOT_ECR_PATH="${ECR_BASE}/${AGENT_NAME}"
+FULL_IMAGE_TAG="${ROOT_ECR_PATH}:${VERSION_TAG}"
 
-# 模式說明：
-# 1. 我們匹配完整的 ECR 路徑，例如：182399696164.dkr.ecr.ap-southeast-1.amazonaws.com/image/a2a_demo_root_agent
-# 2. 我們使用通配符 '.*' 來匹配路徑後面的任何舊標籤 (例如 :latest, :202401010000)
-# 3. 將整個匹配到的字串替換為新的 ECR 路徑 + 新的 $VERSION_TAG
+echo "--- 7. 部署 Root Agent (更新映像標籤) ---"
+echo "  - 使用映像: ${FULL_IMAGE_TAG}"
 
-# Root Agent 部署
-ROOT_YAML="kubernetes/deployment-root.yaml"
-ROOT_ECR_PATH="${ECR_BASE}/a2a_demo_root_agent"
-echo "Updating $ROOT_YAML with image tag: ${ROOT_ECR_PATH}:${VERSION_TAG}"
+# 確認 configmap 有更新
+kubectl apply -f kubernetes/configmap-agent-models.yaml
 
-# sed 替換邏輯：匹配完整的 ECR 映像路徑和任何舊標籤，並替換為新的 $VERSION_TAG
-# 關鍵：這裡我們假設映像路徑是完整的 ECR URL + 映像名稱
-# e.g., s|.../a2a_demo_root_agent:.*|.../a2a_demo_root_agent:${VERSION_TAG}|g
-sed -i "s|${ROOT_ECR_PATH}:.*|${ROOT_ECR_PATH}:${VERSION_TAG}|g" $ROOT_YAML
-kubectl apply -f $ROOT_YAML
+# 使用 kubectl set image 更新 Deployment，這會觸發滾動更新
+kubectl set image deployment/root-agent \
+  "root-agent-container=${FULL_IMAGE_TAG}" \
+  -n $K8S_NAMESPACE
+
+# 套用 Service YAML (確保 Service 存在且指向正確的 Pods)
 kubectl apply -f kubernetes/service-root.yaml
-kubectl rollout restart deployment root-agent -n $K8S_NAMESPACE
 
-# # Remote Agent 1 部署
-# REMOTE1_YAML="kubernetes/deployment-remote1.yaml"
-# REMOTE1_ECR_PATH="${ECR_BASE}/a2a_demo_remote_agent1"
-# echo "Updating $REMOTE1_YAML with image tag: ${REMOTE1_ECR_PATH}:${VERSION_TAG}"
+echo "=== Root Agent Deployment Update Triggered! ==="
 
-# sed -i "s|${REMOTE1_ECR_PATH}:.*|${REMOTE1_ECR_PATH}:${VERSION_TAG}|g" $REMOTE1_YAML
-# kubectl apply -f $REMOTE1_YAML
-# kubectl apply -f kubernetes/service-remote1.yaml
-# kubectl rollout restart deployment remote-agent-1 -n $K8S_NAMESPACE
+# Remote Agent 1 部署
+REMOTE1_AGENT_NAME="a2a_demo_remote_agent1"
+REMOTE1_ECR_PATH="${ECR_BASE}/${REMOTE1_AGENT_NAME}"
+REMOTE1_FULL_IMAGE_TAG="${REMOTE1_ECR_PATH}:${VERSION_TAG}"
 
+echo "--- 8. 部署 Remote Agent 1 (更新映像標籤) ---"
+echo "  - 使用映像: ${REMOTE1_FULL_IMAGE_TAG}"
 
-# # Remote Agent 2 部署
-# REMOTE2_YAML="kubernetes/deployment-remote2.yaml"
-# REMOTE2_ECR_PATH="${ECR_BASE}/a2a_demo_remote_agent2"
-# echo "Updating $REMOTE2_YAML with image tag: ${REMOTE2_ECR_PATH}:${VERSION_TAG}"
+kubectl set image deployment/remote-agent-1 \
+  "remote-agent-1-container=${REMOTE1_FULL_IMAGE_TAG}" \
+  -n $K8S_NAMESPACE
 
-# sed -i "s|${REMOTE2_ECR_PATH}:.*|${REMOTE2_ECR_PATH}:${VERSION_TAG}|g" $REMOTE2_YAML
-# kubectl apply -f $REMOTE2_YAML
-# kubectl apply -f kubernetes/service-remote2.yaml
-# kubectl rollout restart deployment remote-agent-2 -n $K8S_NAMESPACE
+kubectl apply -f kubernetes/service-remote1.yaml
+
+echo "=== Remote Agent 1 Deployment Update Triggered! ==="
+
+# Remote Agent 2 部署
+REMOTE2_AGENT_NAME="a2a_demo_remote_agent2"
+REMOTE2_ECR_PATH="${ECR_BASE}/${REMOTE2_AGENT_NAME}"
+REMOTE2_FULL_IMAGE_TAG="${REMOTE2_ECR_PATH}:${VERSION_TAG}"
+
+echo "--- 9. 部署 Remote Agent 2 (更新映像標籤) ---"
+echo "  - 使用映像: ${REMOTE2_FULL_IMAGE_TAG}"
+
+kubectl set image deployment/remote-agent-2 \
+  "remote-agent-2-container=${REMOTE2_FULL_IMAGE_TAG}" \
+  -n $K8S_NAMESPACE
+
+kubectl apply -f kubernetes/service-remote2.yaml
+
+echo "=== Remote Agent 2 Deployment Update Triggered! ==="
+
+# Summary Agent 部署
+SUMMARY_AGENT_NAME="a2a_demo_summary_agent"
+SUMMARY_ECR_PATH="${ECR_BASE}/${SUMMARY_AGENT_NAME}"
+SUMMARY_FULL_IMAGE_TAG="${SUMMARY_ECR_PATH}:${VERSION_TAG}"
+
+echo "--- 10. 部署 Summary Agent (更新映像標籤) ---"
+echo "  - 使用映像: ${SUMMARY_FULL_IMAGE_TAG}"
+
+kubectl set image deployment/summary-agent \
+  "summary-agent-container=${SUMMARY_FULL_IMAGE_TAG}" \
+  -n $K8S_NAMESPACE
+
+kubectl apply -f kubernetes/service-summary.yaml
+
+echo "=== Summary Agent Deployment Update Triggered! ==="
 
 echo "\n====== CD Deployment Succeeded! ======\n"
 

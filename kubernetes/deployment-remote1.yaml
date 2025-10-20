@@ -3,6 +3,8 @@ kind: Deployment
 metadata:
   name: remote-agent-1
   namespace: a2a-demo # 更新：使用 a2a-demo
+  labels:
+    agentRole: weather
 spec:
   replicas: 1
   selector:
@@ -12,6 +14,7 @@ spec:
     metadata:
       labels:
         app: remote-agent-1
+        agentRole: weather
     spec:
       serviceAccountName: ds-a2a-remote-agent-a-sa  # 使用 IRSA Service Account
       containers:
@@ -19,3 +22,15 @@ spec:
         image: 182399696164.dkr.ecr.ap-southeast-1.amazonaws.com/image/a2a_demo_remote_agent1:20251010052359 # 🚨 替換成你的 Docker image 路徑
         ports:
         - containerPort: 50001
+        env:
+        - name: LLM_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: agent-llm-config
+              key: REMOTE1_MODEL_PROVIDER
+        - name: LLM_MODEL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: agent-llm-config
+              key: REMOTE1_MODEL_ID
+

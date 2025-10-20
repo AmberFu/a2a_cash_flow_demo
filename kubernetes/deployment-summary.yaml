@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: summary-agent
+  namespace: a2a-demo
+  labels:
+    agentRole: summary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: summary-agent
+  template:
+    metadata:
+      labels:
+        app: summary-agent
+        agentRole: summary
+    spec:
+      # ServiceAccount 對應 Terraform local.summary_agent_sa_name
+      serviceAccountName: ds-a2a-remote-agent-b-sa-summary
+      containers:
+      - name: summary-agent-container
+        image: 182399696164.dkr.ecr.ap-southeast-1.amazonaws.com/image/a2a_demo_summary_agent:20251010052359 # 🚨 替換成你的 Docker image 路徑
+        ports:
+        - containerPort: 50003
+        env:
+        - name: LLM_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: agent-llm-config
+              key: SUMMARY_MODEL_PROVIDER
+        - name: LLM_MODEL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: agent-llm-config
+              key: SUMMARY_MODEL_ID
+
+

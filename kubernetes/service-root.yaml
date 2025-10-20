@@ -11,3 +11,4 @@ spec:
       port: 50000       # 🚨 Service 提供的 Port
       targetPort: 50000 # 🚨 容器實際運行的 Port
   type: ClusterIP
+

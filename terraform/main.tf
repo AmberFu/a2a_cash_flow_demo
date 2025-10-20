@@ -108,7 +108,7 @@ output "a2a_audit_table_arn" {
 # 區塊 2: SQS Queues & EventBridge (訊息傳遞)
 # ----------------------------------------
 
-# SQS.remote-a: 派工給 Remote Agent A 的佇列
+# SQS.remote-a: 派工給 Remote Agent A (Weather Agent) 的佇列
 resource "aws_sqs_queue" "remote_a_queue" {
   name                       = var.remote_a_queue_name
   visibility_timeout_seconds = 300
@@ -120,7 +120,7 @@ resource "aws_sqs_queue" "remote_a_queue" {
   }
 }
 
-# SQS.remote-b: 派工給 Remote Agent B 的佇列
+# SQS.remote-b: 派工給 Remote Agent B (Train Agent) 的佇列
 resource "aws_sqs_queue" "remote_b_queue" {
   name                       = var.remote_b_queue_name
   visibility_timeout_seconds = 300
@@ -128,6 +128,18 @@ resource "aws_sqs_queue" "remote_b_queue" {
 
   tags = {
     Name        = var.remote_b_queue_name
+    Environment = "demo"
+  }
+}
+
+# SQS.summary: 派工給 Summary Agent 的佇列
+resource "aws_sqs_queue" "summary_queue" {
+  name                       = local.summary_queue_name
+  visibility_timeout_seconds = 300
+  message_retention_seconds  = 1209600
+
+  tags = {
+    Name        = local.summary_queue_name
     Environment = "demo"
   }
 }
@@ -206,6 +218,30 @@ resource "aws_sqs_queue_policy" "remote_b_queue_policy" {
   })
 }
 
+resource "aws_sqs_queue_policy" "summary_queue_policy" {
+  queue_url = aws_sqs_queue.summary_queue.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowEventBridgeToSendMessage"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+        Action   = "sqs:SendMessage"
+        Resource = aws_sqs_queue.summary_queue.arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = aws_cloudwatch_event_rule.dispatch_summary_rule.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
 # ----------------------------------------
 # IAM Role for EventBridge to SQS
 # ----------------------------------------
@@ -240,6 +276,7 @@ data "aws_iam_policy_document" "eventbridge_sqs_send_policy" {
     resources = [
       aws_sqs_queue.remote_a_queue.arn,
       aws_sqs_queue.remote_b_queue.arn,
+      aws_sqs_queue.summary_queue.arn,
     ]
   }
 }
@@ -266,11 +303,11 @@ resource "aws_cloudwatch_event_bus" "a2a_bus" {
 resource "aws_cloudwatch_event_rule" "dispatch_remote_a_rule" {
   name           = var.dispatch_remote_a_rule_name
   event_bus_name = aws_cloudwatch_event_bus.a2a_bus.name
-  description    = "Route Task.RecognizeTransactions events to SQS.remote-a"
+  description    = "Route Task.GetWeather events to SQS.remote-a"
 
   event_pattern = jsonencode({
     source        = ["a2a.root-agent"]
-    "detail-type" = ["Task.RecognizeTransactions"]
+    "detail-type" = ["Task.GetWeather"]
   })
 
   tags = {
@@ -288,11 +325,11 @@ resource "aws_cloudwatch_event_target" "remote_a_target" {
 resource "aws_cloudwatch_event_rule" "dispatch_remote_b_rule" {
   name           = var.dispatch_remote_b_rule_name
   event_bus_name = aws_cloudwatch_event_bus.a2a_bus.name
-  description    = "Route Task.DraftResponse events to SQS.remote-b"
+  description    = "Route Task.GetTrainSchedule events to SQS.remote-b"
 
   event_pattern = jsonencode({
     source        = ["a2a.root-agent"]
-    "detail-type" = ["Task.DraftResponse"]
+    "detail-type" = ["Task.GetTrainSchedule"]
   })
 
   tags = {
@@ -304,6 +341,28 @@ resource "aws_cloudwatch_event_rule" "dispatch_remote_b_rule" {
 resource "aws_cloudwatch_event_target" "remote_b_target" {
   rule           = aws_cloudwatch_event_rule.dispatch_remote_b_rule.name
   arn            = aws_sqs_queue.remote_b_queue.arn
+  event_bus_name = aws_cloudwatch_event_bus.a2a_bus.name
+}
+
+resource "aws_cloudwatch_event_rule" "dispatch_summary_rule" {
+  name           = local.dispatch_summary_rule_name
+  event_bus_name = aws_cloudwatch_event_bus.a2a_bus.name
+  description    = "Route Task.Summarize events to SQS.summary"
+
+  event_pattern = jsonencode({
+    source        = ["a2a.root-agent"]
+    "detail-type" = ["Task.Summarize"]
+  })
+
+  tags = {
+    Name        = local.dispatch_summary_rule_name
+    Environment = "demo"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "summary_target" {
+  rule           = aws_cloudwatch_event_rule.dispatch_summary_rule.name
+  arn            = aws_sqs_queue.summary_queue.arn
   event_bus_name = aws_cloudwatch_event_bus.a2a_bus.name
 }
 
@@ -320,7 +379,11 @@ data "aws_eks_cluster" "cluster" {
 
 # 從 EKS Cluster 取得 OIDC Provider URL (去掉 https://)
 locals {
-  oidc_provider_url = replace(data.aws_eks_cluster.cluster.identity[0].oidc[0].issuer, "https://", "")
+  oidc_provider_url          = replace(data.aws_eks_cluster.cluster.identity[0].oidc[0].issuer, "https://", "")
+  summary_agent_sa_name      = "${var.remote_agent_b_sa_name}-summary"
+  summary_agent_role_name    = "${var.remote_agent_b_sa_role_name}-summary"
+  summary_queue_name         = "${var.remote_b_queue_name}-summary"
+  dispatch_summary_rule_name = "${var.dispatch_remote_b_rule_name}-summary"
 }
 
 # ========================================
@@ -352,6 +415,16 @@ resource "kubernetes_service_account" "remote_b_sa" {
     namespace = var.k8s_namespace
     annotations = {
       "eks.amazonaws.com/role-arn" = aws_iam_role.remote_agent_b_sa_role.arn
+    }
+  }
+}
+
+resource "kubernetes_service_account" "summary_sa" {
+  metadata {
+    name      = local.summary_agent_sa_name
+    namespace = var.k8s_namespace
+    annotations = {
+      "eks.amazonaws.com/role-arn" = aws_iam_role.summary_agent_sa_role.arn
     }
   }
 }
@@ -572,6 +645,39 @@ resource "aws_iam_role" "remote_agent_b_sa_role" {
   }
 }
 
+data "aws_iam_policy_document" "summary_agent_sa_assume_role" {
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "Federated"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${local.oidc_provider_url}"]
+    }
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_provider_url}:sub"
+      values   = ["system:serviceaccount:${var.k8s_namespace}:${local.summary_agent_sa_name}"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_provider_url}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "summary_agent_sa_role" {
+  name               = local.summary_agent_role_name
+  assume_role_policy = data.aws_iam_policy_document.summary_agent_sa_assume_role.json
+
+  tags = {
+    Name        = local.summary_agent_role_name
+    Environment = "demo"
+    Purpose     = "eks-service-account-irsa"
+    Agent       = "summary-agent"
+  }
+}
+
 data "aws_iam_policy_document" "remote_agent_b_permissions" {
   # SQS 權限 (接收任務)
   statement {
@@ -622,6 +728,56 @@ resource "aws_iam_role_policy" "remote_agent_b_permissions" {
   policy = data.aws_iam_policy_document.remote_agent_b_permissions.json
 }
 
+data "aws_iam_policy_document" "summary_agent_permissions" {
+  # SQS 權限 (接收任務)
+  statement {
+    sid    = "SQSReceiveFromSummary"
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+      "sqs:ChangeMessageVisibility"
+    ]
+    resources = [
+      aws_sqs_queue.summary_queue.arn
+    ]
+  }
+
+  # SQS 權限 (發送結果)
+  statement {
+    sid    = "SQSSendToCallback"
+    effect = "Allow"
+    actions = [
+      "sqs:SendMessage",
+      "sqs:GetQueueUrl"
+    ]
+    resources = [
+      aws_sqs_queue.callback_queue.arn,
+      aws_sqs_queue.hitl_queue.arn
+    ]
+  }
+
+  # DynamoDB 權限 (可選: 寫審計日誌)
+  statement {
+    sid    = "DynamoDBAuditAccess"
+    effect = "Allow"
+    actions = [
+      "dynamodb:PutItem"
+    ]
+    resources = [
+      aws_dynamodb_table.a2a_audit_table.arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "summary_agent_permissions" {
+  name   = "${local.summary_agent_role_name}-permissions"
+  role   = aws_iam_role.summary_agent_sa_role.name
+  policy = data.aws_iam_policy_document.summary_agent_permissions.json
+}
+
 # ----------------------------------------
 # 區塊 4: Redis 連線配置 (僅網路規則)
 # ----------------------------------------
@@ -646,6 +802,10 @@ output "remote_a_queue_url" {
 
 output "remote_b_queue_url" {
   value = aws_sqs_queue.remote_b_queue.id
+}
+
+output "summary_queue_url" {
+  value = aws_sqs_queue.summary_queue.id
 }
 
 output "callback_queue_url" {
@@ -677,6 +837,11 @@ output "remote_agent_a_sa_role_arn" {
 output "remote_agent_b_sa_role_arn" {
   description = "IAM Role ARN for Remote Agent B Service Account (IRSA)"
   value       = aws_iam_role.remote_agent_b_sa_role.arn
+}
+
+output "summary_agent_sa_role_arn" {
+  description = "IAM Role ARN for Summary Agent Service Account (IRSA)"
+  value       = aws_iam_role.summary_agent_sa_role.arn
 }
 
 output "redis_host" {

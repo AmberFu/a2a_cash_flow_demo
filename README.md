@@ -5,43 +5,101 @@
 ```md
 a2a-ds-cashflow-demo/
 ├─ services/
-│  ├─ root-agent/
-│  │  ├─ app/
-│  │  │  ├─ main.py
-│  │  │  └─ a2a/
-│  │  │     ├─ graph.py
-│  │  │     └─ tools.py
-│  │  ├─ Dockerfile
-│  │  └─ requirements.txt
-│  ├─ remote-agent-1/
-│  │  ├─ app/
-│  │  │  ├─ main.py
-│  │  │  └─ a2a/
-│  │  │     ├─ graph.py
-│  │  │     └─ tools.py
-│  │  ├─ Dockerfile
-│  │  └─ requirements.txt
-│  └─ remote-agent-2/
-│     ├─ app/
-│     │  ├─ main.py
-│     │  └─ a2a/
-│     │     ├─ graph.py
-│     │     └─ tools.py
-│     ├─ Dockerfile
-│     └─ requirements.txt
-├─ terraform/
-│  ├─ main.tf
-│  └─ variables.tf
+│   ├─ jsonrpc_gateway/               # JSON-RPC 測試 server/client、README 與 TLS 範例
+│   │   ├─ client.py
+│   │   ├─ server.py
+│   │   └─ README.md
+│   ├─ remote-agent-1/                # Weather Agent (agent 1)
+│   ├─ remote-agent-2/                # Train Agent (agent 2)
+│   ├─ summary-agent/                 # Summary Agent（彙整 Weather/Train 結果）
+│   └─ root-agent/                    # Root Agent FastAPI 應用，支援 JSON-RPC 與 EventBridge/SQS
+│       └─ app/
+│           ├─ main.py
+│           └─ a2a/
+│               ├─ graph.py
+│               └─ tools.py
 ├─ kubernetes/
-│  ├─ namespace.yaml
-│  ├─ deployment-root.yaml
-│  ├─ service-root.yaml
-│  ├─ deployment-remote1.yaml
-│  ├─ service-remote1.yaml
-│  ├─ deployment-remote2.yaml
-│  └─ service-remote2.yaml
+│   ├─ cicd.sh                        # EventBridge/SQS 佈署腳本
+│   ├─ cicd_jsonrpc.sh                # JSON-RPC over HTTPS 測試腳本
+│   ├─ configmap-agent-models.yaml    # 各 Agent LLM 模型設定
+│   ├─ deployment-root.yaml           # Root Agent Deployment（含 JSON-RPC feature flag）
+│   ├─ deployment-remote1.yaml        # Weather Agent Deployment
+│   ├─ deployment-remote2.yaml        # Train Agent Deployment
+│   ├─ deployment-summary.yaml        # Summary Agent Deployment
+│   ├─ namespace.yaml
+│   ├─ service-jsonrpc.yaml           # Root Agent JSON-RPC 專用 ClusterIP（Pod-to-Pod / 內部測試）
+│   ├─ service-root.yaml              # Root Agent 內部 ClusterIP（EventBridge/SQS 回呼）
+│   ├─ service-remote1.yaml
+│   ├─ service-remote2.yaml
+│   └─ service-summary.yaml
+├─ terraform/
+│   ├─ main.tf
+│   └─ README.md
 └─ README.md
 ```
+
+## Agent LLM 模型設定
+
+為了讓每個 Agent 可以使用不同的模型，專案提供 `kubernetes/configmap-agent-models.yaml` 作為集中設定：
+
+```yaml
+data:
+  ROOT_LLM_PROVIDER: "bedrock"
+  ROOT_LLM_MODEL_ID: "anthropic.claude-3-opus-20240229-v1:0"
+  REMOTE1_MODEL_PROVIDER: "bedrock"
+  REMOTE1_MODEL_ID: "anthropic.claude-3-sonnet-20240229-v1:0"
+  REMOTE2_MODEL_PROVIDER: "bedrock"
+  REMOTE2_MODEL_ID: "anthropic.claude-3-haiku-20240307-v1:0"
+  SUMMARY_MODEL_PROVIDER: "bedrock"
+  SUMMARY_MODEL_ID: "anthropic.claude-3-haiku-20240307-v1:0"
+```
+
+步驟建議：
+
+1. 先套用 ConfigMap：
+
+   ```bash
+   kubectl apply -f kubernetes/configmap-agent-models.yaml
+   ```
+
+2. 根據環境需求修改上述 YAML 中的 Provider/Model ID。所有 Agent Deployment 會自動透過 `env.valueFrom.configMapKeyRef` 讀取對應鍵值：
+
+   - `deployment-root.yaml`：載入 Root Agent 自身與 Weather/Train/Summary Agent 的模型資訊，並在 `a2a.describe_agent` 回傳中展示。
+   - `deployment-remote1.yaml`、`deployment-remote2.yaml`、`deployment-summary.yaml`：個別注入 `LLM_PROVIDER` 與 `LLM_MODEL_ID` 環境變數。
+
+3. 若需為不同環境提供不同設定，可複製此 ConfigMap 檔案，並搭配 Helm/Kustomize 或 Terraform Kubernetes Provider 管理差異。更新後重新 `kubectl apply` 即可觸發滾動更新。
+
+## JSON-RPC over HTTPS 架構與設定
+
+* `kubernetes/service-jsonrpc.yaml`：在叢集中建立指向 Root Agent Pod 的 `ClusterIP` Service，標記為 `app: root-agent` 與 `component: jsonrpc`。這個 Service 提供一個穩定的 DNS (`root-agent-jsonrpc.a2a-demo.svc.cluster.local`)，讓 JSON-RPC 請求可以在叢集內（Pod-to-Pod）直接呼叫 Root Agent 的 `/jsonrpc` 端點，也方便透過 `kubectl port-forward` 在測試時對 Root Agent 發送請求。
+* `services/jsonrpc_gateway/`：提供 JSON-RPC 伺服器與客戶端範例程式碼，協助驗證同步通道。同一資料夾的 README 說明如何準備測試憑證（`jsonrpc.crt`/`jsonrpc.key`）與執行測試腳本。
+
+### 取得並設定 certificate-arn 與 hostname（選用）
+
+> 預設情境僅需叢集內部的 Pod-to-Pod 溝通，因此不需要額外的 Ingress 或負載平衡器。若未來要把 JSON-RPC 介面對外暴露，可依下列步驟延伸部署：
+
+1. **尋找或申請 ACM 憑證**
+   * 透過 AWS ACM 主控台或 CLI 申請/匯入網域憑證：
+     ```bash
+     aws acm request-certificate \
+       --region ap-southeast-1 \
+       --domain-name jsonrpc.example.com \
+       --validation-method DNS
+     ```
+   * 若已有憑證，可用下列指令列出 ARN：
+     ```bash
+     aws acm list-certificates --region ap-southeast-1 --query 'CertificateSummaryList[].{DomainName:DomainName,Arn:CertificateArn}'
+     ```
+   * 在 Terraform 中也可以使用 `data "aws_acm_certificate"` 擷取既有憑證，將 ARN 注入自訂的 Ingress、API Gateway 或 Load Balancer 設定。
+
+2. **選擇對外入口**
+   * **Kubernetes Ingress / AWS Load Balancer Controller**：自行建立 Ingress YAML 或使用 Helm chart，指定 `alb.ingress.kubernetes.io/certificate-arn`、`external-dns.alpha.kubernetes.io/hostname` 等註解，即可讓 ALB 終止 TLS。
+   * **API Gateway + VPC Link**：維持 Service 為 ClusterIP，另外以 Terraform 建立 `aws_apigatewayv2_vpc_link`、`aws_apigatewayv2_integration` 指向該 Service 所對應的內部 Load Balancer，TLS 由 API Gateway 處理。
+   * **Service type=LoadBalancer / NLB**：將 Service 改為 `LoadBalancer` 類型，利用 AWS NLB or CLB 提供對外入口。
+
+3. **Terraform 控制**
+   * 建議將憑證 ARN、網域、對外入口類型寫成變數，並透過 Terraform 的 Kubernetes Provider 或 AWS Provider 管理，避免手動 drift。
+
 
 ## Pre-request
 

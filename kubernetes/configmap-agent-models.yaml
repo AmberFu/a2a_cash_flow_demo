@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-llm-config
+  namespace: a2a-demo
+  labels:
+    app: a2a-llm-config
+    component: agent-models
+    managed-by: a2a-demo
+    purpose: llm-selection
+    scope: demo
+  annotations:
+    description: "Default LLM 模型設定，可依照環境覆寫"
+data:
+  ROOT_LLM_PROVIDER: "bedrock"
+  ROOT_LLM_MODEL_ID: "anthropic.claude-3-opus-20240229-v1:0"
+  REMOTE1_MODEL_PROVIDER: "bedrock"
+  REMOTE1_MODEL_ID: "anthropic.claude-3-sonnet-20240229-v1:0"
+  REMOTE2_MODEL_PROVIDER: "bedrock"
+  REMOTE2_MODEL_ID: "anthropic.claude-3-haiku-20240307-v1:0"
+  SUMMARY_MODEL_PROVIDER: "bedrock"
+  SUMMARY_MODEL_ID: "anthropic.claude-3-haiku-20240307-v1:0"
