@@ -49,10 +49,12 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-def lifespan(app: FastAPI):
-    print("Application is starting up...")
-    yield
-    print("Application is shutting down...")
+async def lifespan(app: FastAPI):
+    logger.info("Application is starting up...")
+    try:
+        yield
+    finally:
+        logger.info("Application is shutting down...")
 
 
 app = FastAPI(

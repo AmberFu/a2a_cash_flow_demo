@@ -87,12 +87,19 @@ echo "=== Kubeconfig Updated! ==="
 # Root Agent 部署
 ROOT_YAML="kubernetes/deployment-root.yaml"
 ROOT_ECR_PATH="${ECR_BASE}/a2a_demo_root_agent"
-echo "Updating $ROOT_YAML with image tag: ${ROOT_ECR_PATH}:${VERSION_TAG}"
+FULL_IMAGE_TAG="${ROOT_ECR_PATH}:${VERSION_TAG}"
+echo "--- 6. 部署 Root Agent (更新映像標籤) ---"
+echo "  - 使用映像: ${FULL_IMAGE_TAG}"
+
+# 確認 configmap 有更新
+kubectl apply -f kubernetes/configmap-agent-models.yaml
+
+echo "Updating $ROOT_YAML with image tag: ${FULL_IMAGE_TAG}"
 
 # sed 替換邏輯：匹配完整的 ECR 映像路徑和任何舊標籤，並替換為新的 $VERSION_TAG
 # 關鍵：這裡我們假設映像路徑是完整的 ECR URL + 映像名稱
 # e.g., s|.../a2a_demo_root_agent:.*|.../a2a_demo_root_agent:${VERSION_TAG}|g
-sed -i "s|${ROOT_ECR_PATH}:.*|${ROOT_ECR_PATH}:${VERSION_TAG}|g" $ROOT_YAML
+sed -i "s|${ROOT_ECR_PATH}:.*|${FULL_IMAGE_TAG}|g" $ROOT_YAML
 kubectl apply -f $ROOT_YAML
 kubectl apply -f kubernetes/service-root.yaml
 kubectl rollout restart deployment root-agent -n $K8S_NAMESPACE
