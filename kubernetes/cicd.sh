@@ -135,6 +135,8 @@ SUMMARY_FULL_IMAGE_TAG="${SUMMARY_ECR_PATH}:${VERSION_TAG}"
 echo "--- 10. 部署 Summary Agent (更新映像標籤) ---"
 echo "  - 使用映像: ${SUMMARY_FULL_IMAGE_TAG}"
 
+kubectl apply -f kubernetes/deployment-summary.yaml
+
 kubectl set image deployment/summary-agent \
   "summary-agent-container=${SUMMARY_FULL_IMAGE_TAG}" \
   -n $K8S_NAMESPACE
@@ -150,7 +152,8 @@ echo "\n====== CD Deployment Succeeded! ======\n"
 # --- 7. 部署後檢查與日誌輸出 ---
 echo "Wait for rollout completion (max 300 sec)..."
 kubectl rollout status deployment/root-agent -n $K8S_NAMESPACE --timeout=300s
-# kubectl rollout status deployment/remote-agent-1 -n $K8S_NAMESPACE --timeout=300s
+kubectl rollout status deployment/remote-agent-1 -n $K8S_NAMESPACE --timeout=300s
+kubectl rollout status deployment/summary-agent -n $K8S_NAMESPACE --timeout=300s
 # kubectl rollout status deployment/remote-agent-2 -n $K8S_NAMESPACE --timeout=300s
 
 
@@ -172,17 +175,17 @@ echo "\$REMOTE_AG1_POD: $REMOTE_AG1_POD"
 kubectl logs $REMOTE_AG1_POD -n a2a-demo --tail=100
 echo "------"
 
-# Remote Agent 2 - POD name
-REMOTE_AG2_POD=$(kubectl get pods -n a2a-demo -l app=remote-agent-2 -o jsonpath='{.items[0].metadata.name}')
-echo "\$REMOTE_AG2_POD: $REMOTE_AG2_POD"
-kubectl logs $REMOTE_AG2_POD -n a2a-demo --tail=100
-echo "------"
+# # Remote Agent 2 - POD name
+# REMOTE_AG2_POD=$(kubectl get pods -n a2a-demo -l app=remote-agent-2 -o jsonpath='{.items[0].metadata.name}')
+# echo "\$REMOTE_AG2_POD: $REMOTE_AG2_POD"
+# kubectl logs $REMOTE_AG2_POD -n a2a-demo --tail=100
+# echo "------"
 
-# Summary Agent - POD name
-SUMMARY_POD=$(kubectl get pods -n a2a-demo -l app=summary-agent -o jsonpath='{.items[0].metadata.name}')
-echo "\$SUMMARY_POD: $SUMMARY_POD"
-kubectl logs $SUMMARY_POD -n a2a-demo --tail=100
-echo "------"
+# # Summary Agent - POD name
+# SUMMARY_POD=$(kubectl get pods -n a2a-demo -l app=summary-agent -o jsonpath='{.items[0].metadata.name}')
+# echo "\$SUMMARY_POD: $SUMMARY_POD"
+# kubectl logs $SUMMARY_POD -n a2a-demo --tail=100
+# echo "------"
 
 
 
