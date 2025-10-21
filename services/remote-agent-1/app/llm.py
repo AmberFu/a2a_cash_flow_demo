@@ -14,17 +14,18 @@ def synthesize_weather_summary(
     :return: 字串，格式包含基本資訊與整體天氣敘述。
     """
 
-    base = (
-        f"氣溫 {variables.temperature_c:.1f} 度，"
-        f"降雨機率 {variables.precipitation_chance_percent}% ，"
-        f"相對濕度 {variables.humidity_percent}% ，"
-        f"風速 {variables.wind_speed_kmh:.1f} 公里/小時，"
-        f"預估降雨量 {variables.precipitation_mm:.1f} 毫米，"
-        f"空氣品質 {variables.air_quality}。"
-    )
+    base_segments = [
+        f"氣溫 {variables.temperature_c:.1f} 度，",
+        f"降雨機率 {variables.precipitation_chance_percent}%，",
+        f"相對濕度 {variables.humidity_percent}%，",
+        f"風速 {variables.wind_speed_kmh:.1f} 公里/小時，",
+        f"預估降雨量 {variables.precipitation_mm:.1f} 毫米，",
+        f"空氣品質 {variables.air_quality}。",
+    ]
 
     if variables.special_weather:
-        base += f"留意特殊現象：{variables.special_weather}。"
+        base_segments.append(f"留意特殊現象：{variables.special_weather}。")
+    base = "".join(base_segments)
 
     overall_condition = "晴時多雲"
     if variables.precipitation_chance_percent >= 70:
@@ -37,8 +38,8 @@ def synthesize_weather_summary(
         overall_condition = "涼爽舒適"
 
     summary = (
-        f"{base}整體而言，在 {request.date.isoformat()} {request.time_range} 整體天氣狀況是"
-        f"{overall_condition}。"
+        f"{base}整體而言，在 {request.city} {request.date.isoformat()} {request.time_range} "
+        f"整體天氣狀況是{overall_condition}。"
     )
     return summary
 
