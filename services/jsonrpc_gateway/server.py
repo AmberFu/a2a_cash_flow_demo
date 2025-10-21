@@ -122,7 +122,7 @@ class JSONRPCHandler(BaseHTTPRequestHandler):
         super().log_message(format, *args)
 
 
-def run_server(host: str = "0.0.0.0", port: int = 50000) -> None:
+def run_server(host: str = "0.0.0.0", port: int = 50010) -> None:
     """啟動 JSON-RPC 伺服器，並視需要套用 TLS。"""
     httpd = HTTPServer((host, port), JSONRPCHandler)
 

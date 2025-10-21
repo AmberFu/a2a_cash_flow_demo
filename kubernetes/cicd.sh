@@ -46,23 +46,23 @@ echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
 
 
 # --- 4. Remote Agent 2 處理 - create ECR image ---
-AGENT_NAME="a2a_demo_remote_agent2"
-ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
-echo "--- Building $AGENT_NAME ---"
-docker build -f services/remote-agent-2/Dockerfile -t ${AGENT_NAME}:${VERSION_TAG} services/remote-agent-2 --network sagemaker
-docker tag ${AGENT_NAME}:${VERSION_TAG} ${ECR_IMAGE}:${VERSION_TAG}
-docker push ${ECR_IMAGE}:${VERSION_TAG}
-echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
+# AGENT_NAME="a2a_demo_remote_agent2"
+# ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
+# echo "--- Building $AGENT_NAME ---"
+# docker build -f services/remote-agent-2/Dockerfile -t ${AGENT_NAME}:${VERSION_TAG} services/remote-agent-2 --network sagemaker
+# docker tag ${AGENT_NAME}:${VERSION_TAG} ${ECR_IMAGE}:${VERSION_TAG}
+# docker push ${ECR_IMAGE}:${VERSION_TAG}
+# echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
 
 
 # --- 5. Summary Agent 處理 - create ECR image ---
-AGENT_NAME="a2a_demo_summary_agent"
-ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
-echo "--- Building $AGENT_NAME ---"
-docker build -f services/summary-agent/Dockerfile -t ${AGENT_NAME}:${VERSION_TAG} services/summary-agent --network sagemaker
-docker tag ${AGENT_NAME}:${VERSION_TAG} ${ECR_IMAGE}:${VERSION_TAG}
-docker push ${ECR_IMAGE}:${VERSION_TAG}
-echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
+# AGENT_NAME="a2a_demo_summary_agent"
+# ECR_IMAGE="${ECR_BASE}/${AGENT_NAME}"
+# echo "--- Building $AGENT_NAME ---"
+# docker build -f services/summary-agent/Dockerfile -t ${AGENT_NAME}:${VERSION_TAG} services/summary-agent --network sagemaker
+# docker tag ${AGENT_NAME}:${VERSION_TAG} ${ECR_IMAGE}:${VERSION_TAG}
+# docker push ${ECR_IMAGE}:${VERSION_TAG}
+# echo "=== Push $AGENT_NAME to ECR Succeeded! Tag: ${VERSION_TAG} ==="
 
 
 # --- CD 部分：更新 Kubernetes YAML 與部署 ---
@@ -135,6 +135,8 @@ SUMMARY_FULL_IMAGE_TAG="${SUMMARY_ECR_PATH}:${VERSION_TAG}"
 echo "--- 10. 部署 Summary Agent (更新映像標籤) ---"
 echo "  - 使用映像: ${SUMMARY_FULL_IMAGE_TAG}"
 
+kubectl apply -f kubernetes/deployment-summary.yaml
+
 kubectl set image deployment/summary-agent \
   "summary-agent-container=${SUMMARY_FULL_IMAGE_TAG}" \
   -n $K8S_NAMESPACE
@@ -150,7 +152,8 @@ echo "\n====== CD Deployment Succeeded! ======\n"
 # --- 7. 部署後檢查與日誌輸出 ---
 echo "Wait for rollout completion (max 300 sec)..."
 kubectl rollout status deployment/root-agent -n $K8S_NAMESPACE --timeout=300s
-# kubectl rollout status deployment/remote-agent-1 -n $K8S_NAMESPACE --timeout=300s
+kubectl rollout status deployment/remote-agent-1 -n $K8S_NAMESPACE --timeout=300s
+kubectl rollout status deployment/summary-agent -n $K8S_NAMESPACE --timeout=300s
 # kubectl rollout status deployment/remote-agent-2 -n $K8S_NAMESPACE --timeout=300s
 
 
@@ -166,24 +169,36 @@ echo "\$ROOT_POD: $ROOT_POD"
 kubectl logs $ROOT_POD -n a2a-demo --tail=100
 echo "------"
 
-# # Remote Agent 1 - POD name
-# REMOTE_AG1_POD=$(kubectl get pods -n a2a-demo -l app=remote-agent-1 -o jsonpath='{.items[0].metadata.name}')
-# echo "\$REMOTE_AG1_POD: $REMOTE_AG1_POD"
-# kubectl logs $REMOTE_AG1_POD -n a2a-demo --tail=100
+# Remote Agent 1 - POD name
+REMOTE_AG1_POD=$(kubectl get pods -n a2a-demo -l app=remote-agent-1 -o jsonpath='{.items[0].metadata.name}')
+echo "\$REMOTE_AG1_POD: $REMOTE_AG1_POD"
+kubectl logs $REMOTE_AG1_POD -n a2a-demo --tail=100
+echo "------"
+
+# # Remote Agent 2 - POD name
+# REMOTE_AG2_POD=$(kubectl get pods -n a2a-demo -l app=remote-agent-2 -o jsonpath='{.items[0].metadata.name}')
+# echo "\$REMOTE_AG2_POD: $REMOTE_AG2_POD"
+# kubectl logs $REMOTE_AG2_POD -n a2a-demo --tail=100
 # echo "------"
 
-# # Remote Agent 1 - POD name
-# REMOTE_AG2_POD=$(kubectl get pods -n a2a-demo -l app=remote-agent-2 -o jsonpath='{.items[0].metadata.name}')
-# echo "\$REMOTE_AG1_POD: $REMOTE_AG2_POD"
-# kubectl logs $REMOTE_AG2_POD -n a2a-demo --tail=100
+# # Summary Agent - POD name
+# SUMMARY_POD=$(kubectl get pods -n a2a-demo -l app=summary-agent -o jsonpath='{.items[0].metadata.name}')
+# echo "\$SUMMARY_POD: $SUMMARY_POD"
+# kubectl logs $SUMMARY_POD -n a2a-demo --tail=100
 # echo "------"
 
 
 
 ######## 測試時：
 # 確保您的 kubectl 已配置並指向 EKS 叢集
-kubectl port-forward svc/root-agent-service 50000:50000 --namespace a2a-demo
-# 執行後，這個指令會持續運行在前景
+# kubectl port-forward svc/root-agent-service 50000:50000 --namespace a2a-demo
+# Remote Agent 1 服務（啟用）
+kubectl port-forward svc/remote-agent-1-service 50001:50001 --namespace a2a-demo
+# Remote Agent 2 服務（可視需求啟用）
+# kubectl port-forward svc/remote-agent-2-service 50002:50002 --namespace a2a-demo
+# Summary Agent 服務（可視需求啟用）
+# kubectl port-forward svc/summary-agent-service 50003:50003 --namespace a2a-demo
+# 執行後，這些指令會持續運行在前景
 
 # 測試 POST /tasks
 # # POST /tasks (Start Workflow)

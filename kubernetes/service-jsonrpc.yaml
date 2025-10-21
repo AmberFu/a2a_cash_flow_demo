@@ -14,7 +14,7 @@ spec:
     app: root-agent
   ports:
     - name: jsonrpc-https
-      port: 50000
-      targetPort: 50000
+      port: 50010
+      targetPort: 50010
       protocol: TCP
   type: ClusterIP
