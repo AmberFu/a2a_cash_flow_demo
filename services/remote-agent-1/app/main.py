@@ -10,9 +10,9 @@ from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
 
-from .llm import synthesize_weather_summary
-from .models import WeatherReportRequest, WeatherReportResponse
-from .weather_generator import generate_city_weather_variables
+from llm import synthesize_weather_summary
+from models import WeatherReportRequest, WeatherReportResponse
+from weather_generator import generate_city_weather_variables
 
 PORT = int(os.environ.get("PORT", 50001))
 
@@ -89,5 +89,5 @@ def weather_report(request: WeatherReportRequest) -> WeatherReportResponse:
 
 
 if __name__ == "__main__":
-    uvicorn.run(app="main:app", host="0.0.0.0", port=PORT, reload=True)
+    uvicorn.run(app="main:app", host="0.0.0.0", port=PORT)
 

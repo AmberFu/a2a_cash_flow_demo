@@ -1,7 +1,7 @@
 """模擬 LLM 根據天氣資料產出摘要的輔助函式。"""
 from __future__ import annotations
 
-from .models import CityWeatherVariables, WeatherReportRequest
+from models import CityWeatherVariables, WeatherReportRequest
 
 
 def synthesize_weather_summary(

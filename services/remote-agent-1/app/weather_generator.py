@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 from typing import Iterable
 
-from .models import CityWeatherVariables
+from models import CityWeatherVariables
 
 
 _AIR_QUALITY_OPTIONS: Iterable[str] = (

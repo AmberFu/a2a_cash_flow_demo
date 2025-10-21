@@ -21,7 +21,7 @@ python services/jsonrpc_gateway/server.py
 
 # 另一個終端呼叫 describe_agent
 python services/jsonrpc_gateway/client.py \
-  --endpoint http://127.0.0.1:50000/jsonrpc \
+  --endpoint http://127.0.0.1:50010/jsonrpc \
   --method a2a.describe_agent
 ```
 
@@ -36,7 +36,7 @@ JSONRPC_TLS_CERT=/tmp/jsonrpc.crt JSONRPC_TLS_KEY=/tmp/jsonrpc.key \
 python services/jsonrpc_gateway/server.py
 
 python services/jsonrpc_gateway/client.py \
-  --endpoint https://127.0.0.1:50000/jsonrpc \
+  --endpoint https://127.0.0.1:50010/jsonrpc \
   --method a2a.describe_agent \
   --insecure
 ```
