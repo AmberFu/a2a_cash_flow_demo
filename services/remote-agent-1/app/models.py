@@ -1,7 +1,7 @@
 """Remote Agent 1 專用的資料模型模組。"""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date as DateType
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -37,7 +37,7 @@ class WeatherReportRequest(BaseModel):
     """Weather Remote Agent 接受的請求格式。"""
 
     city: str = Field(..., description="城市名稱，建議使用英文或中文名稱。")
-    date: date = Field(..., description="查詢的日期，格式為 YYYY-MM-DD。")
+    date: DateType = Field(..., description="查詢的日期，格式為 YYYY-MM-DD。")
     time_range: str = Field(
         ..., description="時間區段，例如『上午』、『下午』或『夜間』。"
     )
@@ -47,7 +47,7 @@ class WeatherReportResponse(BaseModel):
     """Weather Remote Agent 回傳的天氣摘要。"""
 
     city: str = Field(description="城市名稱，與請求中的值相同。")
-    date: date = Field(description="查詢日期，與請求中的值相同。")
+    date: DateType = Field(description="查詢日期，與請求中的值相同。")
     time_range: str = Field(description="時間區段，與請求中的值相同。")
     variables: CityWeatherVariables = Field(
         description="城市天氣變數產生器生成的原始天氣指標。"
