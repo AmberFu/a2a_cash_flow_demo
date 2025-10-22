@@ -38,6 +38,20 @@ a2a-ds-cashflow-demo/
 └─ README.md
 ```
 
+## Root 與 Remote Agents 互動流程
+
+專案中的 Root Agent 會根據使用者需求協調多個 Remote Agents 取得所需資訊：
+
+1. **使用者請求**：Root Agent FastAPI 服務透過 JSON-RPC 或事件驅動介面接收使用者問題與上下文。
+2. **下游呼叫**：Root Agent 依據任務將請求分派給 Remote Agent 1（天氣摘要）、Remote Agent 2（交通資訊規劃）以及 Summary Agent（整合回報）。
+3. **資料蒐集**：
+   - Remote Agent 1 產生指定地點的天氣摘要與行前提醒。
+   - Remote Agent 2 隨機生成符合抵達時間限制的交通班次資訊。
+   - Summary Agent 接收前述兩個 Remote Agents 的結果並整理為最終摘要。
+4. **回傳結果**：Root Agent 收到下游輸出後會進行彙整（必要時由 Summary Agent 協助），並將整體回覆返回給使用者或上游系統。
+
+這個流程讓 Root Agent 能夠集中協調多個專責的 Remote Agents，同時保持各服務的獨立部署與測試流程。
+
 ## Agent LLM 模型設定
 
 為了讓每個 Agent 可以使用不同的模型，專案提供 `kubernetes/configmap-agent-models.yaml` 作為集中設定：

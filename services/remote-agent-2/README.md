@@ -67,12 +67,3 @@ curl -I http://localhost:50002/metrics
 
 若返回 `HTTP/1.1 200 OK`，表示 Prometheus metrics 端點正常。
 
-## 5. 使用 pytest 進行整體驗證
-
-在專案根目錄執行：
-
-```bash
-pytest
-```
-
-此指令會啟動 Remote Agent 2 的 FastAPI 測試案例，確保模組可以正常啟動並回傳預期的資料結構。
