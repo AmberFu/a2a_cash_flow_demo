@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
 
@@ -37,7 +38,16 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
-Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+instrumentator = Instrumentator()
+instrumentator.instrument(app)
+instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
+
+
+@app.head("/", include_in_schema=False)
+def healthcheck_head() -> Response:
+    """Provide a lightweight health response for HEAD probes."""
+
+    return Response(status_code=200)
 
 
 @app.get("/")
@@ -65,6 +75,13 @@ def summarize(request: SummaryRequest) -> SummaryResponse:
         request.user_requirement.destination,
     )
     return craft_summary_response(request, settings.llm_provider, settings.llm_model_id)
+
+
+@app.head("/metrics", include_in_schema=False)
+def metrics_head() -> Response:
+    """Ensure observability checks using HEAD succeed like the root agent."""
+
+    return Response(status_code=200, headers={"Content-Type": CONTENT_TYPE_LATEST})
 
 
 if __name__ == "__main__":
