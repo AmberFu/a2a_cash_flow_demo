@@ -38,6 +38,44 @@ a2a-ds-cashflow-demo/
 └─ README.md
 ```
 
+## Remote Agent 2 本地測試流程
+
+若只想驗證交通資訊 Remote Agent 2，可以依照下列步驟在本地啟動與測試：
+
+1. 安裝套件：
+
+   ```bash
+   cd services/remote-agent-2
+   pip install -r requirements.txt
+   ```
+
+2. 啟動服務：
+
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port 50002 --reload
+   ```
+
+3. 送出測試請求（以下示範使用 `curl`，抵達時間會是生成班次的上限）：
+
+   ```bash
+   curl -X POST "http://localhost:50002/transport/plans" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "destination": "台南",
+       "arrival_time": "16:30:00",
+       "date": "2024-07-01",
+       "results": 3
+     }'
+   ```
+
+4. 檢查 Prometheus metrics 端點確保可用：
+
+   ```bash
+   curl -I http://localhost:50002/metrics
+   ```
+
+   `HTTP/1.1 200 OK` 代表 `/metrics` 成功啟用。
+
 ## Agent LLM 模型設定
 
 為了讓每個 Agent 可以使用不同的模型，專案提供 `kubernetes/configmap-agent-models.yaml` 作為集中設定：
