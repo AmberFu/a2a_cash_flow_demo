@@ -127,23 +127,23 @@ kubectl apply -f kubernetes/service-remote2.yaml
 
 echo "=== Remote Agent 2 Deployment Update Triggered! ==="
 
-# Summary Agent 部署
-SUMMARY_AGENT_NAME="a2a_demo_summary_agent"
-SUMMARY_ECR_PATH="${ECR_BASE}/${SUMMARY_AGENT_NAME}"
-SUMMARY_FULL_IMAGE_TAG="${SUMMARY_ECR_PATH}:${VERSION_TAG}"
-
-echo "--- 10. 部署 Summary Agent (更新映像標籤) ---"
-echo "  - 使用映像: ${SUMMARY_FULL_IMAGE_TAG}"
-
-kubectl apply -f kubernetes/deployment-summary.yaml
-
-kubectl set image deployment/summary-agent \
-  "summary-agent-container=${SUMMARY_FULL_IMAGE_TAG}" \
-  -n $K8S_NAMESPACE
-
-kubectl apply -f kubernetes/service-summary.yaml
-
-echo "=== Summary Agent Deployment Update Triggered! ==="
+# Summary Agent 部署（暫停）
+# SUMMARY_AGENT_NAME="a2a_demo_summary_agent"
+# SUMMARY_ECR_PATH="${ECR_BASE}/${SUMMARY_AGENT_NAME}"
+# SUMMARY_FULL_IMAGE_TAG="${SUMMARY_ECR_PATH}:${VERSION_TAG}"
+#
+# echo "--- 10. 部署 Summary Agent (更新映像標籤) ---"
+# echo "  - 使用映像: ${SUMMARY_FULL_IMAGE_TAG}"
+#
+# kubectl apply -f kubernetes/deployment-summary.yaml
+#
+# kubectl set image deployment/summary-agent \
+#   "summary-agent-container=${SUMMARY_FULL_IMAGE_TAG}" \
+#   -n $K8S_NAMESPACE
+#
+# kubectl apply -f kubernetes/service-summary.yaml
+#
+# echo "=== Summary Agent Deployment Update Triggered! ==="
 
 echo "\n====== CD Deployment Succeeded! ======\n"
 
@@ -153,7 +153,7 @@ echo "\n====== CD Deployment Succeeded! ======\n"
 echo "Wait for rollout completion (max 300 sec)..."
 kubectl rollout status deployment/root-agent -n $K8S_NAMESPACE --timeout=300s
 kubectl rollout status deployment/remote-agent-1 -n $K8S_NAMESPACE --timeout=300s
-kubectl rollout status deployment/summary-agent -n $K8S_NAMESPACE --timeout=300s
+# kubectl rollout status deployment/summary-agent -n $K8S_NAMESPACE --timeout=300s
 kubectl rollout status deployment/remote-agent-2 -n $K8S_NAMESPACE --timeout=300s
 
 

@@ -8,7 +8,7 @@ from typing import Iterable, List
 
 from fastapi import HTTPException
 
-from .models import (
+from models import (
     PricingAndServiceInfo,
     StationInfo,
     TimeInfo,

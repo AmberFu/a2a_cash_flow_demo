@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
 
-from .models import TransportPlanRequest, TransportPlanResponse
-from .transport_service import generate_transport_plans
+from models import TransportPlanRequest, TransportPlanResponse
+from transport_service import generate_transport_plans
 
 
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
@@ -82,4 +82,4 @@ def generate_transport_plan_endpoint(
 
 
 if __name__ == "__main__":
-    uvicorn.run(app="app.main:app", host="0.0.0.0", port=PORT, reload=True)
+    uvicorn.run(app="main:app", host="0.0.0.0", port=PORT)
