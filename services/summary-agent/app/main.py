@@ -1,87 +1,72 @@
-"""Summary Agent stub service for aggregating downstream results.
+"""Summary Agent service entrypoint."""
 
-This service is intentionally lightweight so the demo can run without
-provisioning an additional LLM endpoint.  It exposes a JSON API that can be
-invoked either directly (ClusterIP service, port-forward) or indirectly via
-SQS/EventBridge callbacks handled by the root agent.
-"""
 from __future__ import annotations
 
-import os
-from typing import List, Optional
+import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
 
-APP = FastAPI(title="Summary Agent", version="0.1.0")
-PORT = int(os.environ.get("PORT", 50003))
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "bedrock")
-LLM_MODEL_ID = os.environ.get("LLM_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
+from .config import get_settings
+from .models import SummaryRequest, SummaryResponse
+from .summarizer import craft_summary_response
 
 
-class SummaryRequest(BaseModel):
-    task_id: str = Field(..., description="Workflow task identifier from the root agent")
-    budget: Optional[str] = Field(None, description="Optional budget string provided by the user")
-    weather_advice: Optional[str] = Field(None, description="Weather agent synthesized output")
-    train_options: Optional[List[str]] = Field(
-        None, description="Shortlist of train recommendations provided by the transport agent"
-    )
+LOG_FORMAT = "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
+logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
+logger = logging.getLogger(__name__)
+
+settings = get_settings()
 
 
-class SummaryResponse(BaseModel):
-    task_id: str
-    provider: str
-    model: str
-    recommendation: str
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Summary Agent is starting up on port %s", settings.port)
+    try:
+        yield
+    finally:
+        logger.info("Summary Agent is shutting down")
 
 
-def craft_summary(payload: SummaryRequest) -> SummaryResponse:
-    """Mock a natural language suggestion using environment-provided metadata."""
-    parts: List[str] = [
-        "感謝使用 A2A Cash Flow Demo 摘要服務!",
-        f"目前摘要代理正在使用 {LLM_PROVIDER} 的 {LLM_MODEL_ID} 模型。",
-    ]
-    if payload.weather_advice:
-        parts.append(f"天氣建議：{payload.weather_advice}")
-    if payload.train_options:
-        items = "、".join(payload.train_options)
-        parts.append(f"火車班次建議：{items}")
-    if payload.budget:
-        parts.append(f"預算參考：{payload.budget}")
-
-    if len(parts) == 2:
-        parts.append("尚未接收到遠端代理的建議，請稍候或透過 HITL 補充資訊。")
-
-    recommendation = "\n".join(parts)
-    return SummaryResponse(
-        task_id=payload.task_id,
-        provider=LLM_PROVIDER,
-        model=LLM_MODEL_ID,
-        recommendation=recommendation,
-    )
+app = FastAPI(
+    title="Summary Agent",
+    description="Aggregates weather and transport recommendations into actionable advice.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 
-@APP.get("/")
+@app.get("/")
 def healthcheck() -> JSONResponse:
-    """Return a status payload describing the configured model."""
+    """Return basic health information for observability."""
+
     return JSONResponse(
         {
             "status": "OK",
             "agent": "Summary Agent",
-            "port": PORT,
-            "llm_provider": LLM_PROVIDER,
-            "llm_model_id": LLM_MODEL_ID,
+            "port": settings.port,
+            "llm_provider": settings.llm_provider,
+            "llm_model_id": settings.llm_model_id,
         }
     )
 
 
-@APP.post("/summaries", response_model=SummaryResponse)
-def summarize(payload: SummaryRequest) -> SummaryResponse:
-    """Accept intermediate results and craft a user friendly summary."""
-    return craft_summary(payload)
+@app.post("/summaries", response_model=SummaryResponse)
+def summarize(request: SummaryRequest) -> SummaryResponse:
+    """Craft a travel summary combining remote agent outputs."""
+
+    logger.info(
+        "Creating summary for task %s with destination %s",
+        request.task_id,
+        request.user_requirement.destination,
+    )
+    return craft_summary_response(request, settings.llm_provider, settings.llm_model_id)
 
 
 if __name__ == "__main__":
-    uvicorn.run(app="main:APP", host="0.0.0.0", port=PORT)
+    uvicorn.run(app="main:app", host="0.0.0.0", port=settings.port)
+
