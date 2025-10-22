@@ -1,13 +1,11 @@
-"""Summary Agent service entrypoint."""
-
+"""摘要代理服務：整合遠端代理的結果並產生旅遊建議。"""
 from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from prometheus_client import CONTENT_TYPE_LATEST
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
 
@@ -15,45 +13,33 @@ from .config import get_settings
 from .models import SummaryRequest, SummaryResponse
 from .summarizer import craft_summary_response
 
-
-LOG_FORMAT = "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
-logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
-logger = logging.getLogger(__name__)
-
 settings = get_settings()
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """初始化與釋放摘要代理需要的資源。"""
+
     logger.info("Summary Agent is starting up on port %s", settings.port)
-    try:
-        yield
-    finally:
-        logger.info("Summary Agent is shutting down")
+    yield
+    logger.info("Summary Agent is shutting down")
 
 
-app = FastAPI(
-    title="Summary Agent",
-    description="Aggregates weather and transport recommendations into actionable advice.",
-    version="1.0.0",
-    lifespan=lifespan,
-)
-instrumentator = Instrumentator()
-instrumentator.instrument(app)
-instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
-
-
-@app.head("/", include_in_schema=False)
-def healthcheck_head() -> Response:
-    """Provide a lightweight health response for HEAD probes."""
-
-    return Response(status_code=200)
+app = FastAPI(title="Summary Agent", version="0.2.0", lifespan=lifespan)
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 
 @app.get("/")
 def healthcheck() -> JSONResponse:
-    """Return basic health information for observability."""
+    """回傳服務狀態與當前模型設定。"""
 
+    logger.debug("Healthcheck requested")
     return JSONResponse(
         {
             "status": "OK",
@@ -67,23 +53,22 @@ def healthcheck() -> JSONResponse:
 
 @app.post("/summaries", response_model=SummaryResponse)
 def summarize(request: SummaryRequest) -> SummaryResponse:
-    """Craft a travel summary combining remote agent outputs."""
+    """整合遠端代理結果並產出建議與提醒。"""
 
     logger.info(
-        "Creating summary for task %s with destination %s",
+        "Generating summary for task_id=%s, origin=%s, destination=%s",
         request.task_id,
+        request.user_requirement.origin,
         request.user_requirement.destination,
     )
-    return craft_summary_response(request, settings.llm_provider, settings.llm_model_id)
-
-
-@app.head("/metrics", include_in_schema=False)
-def metrics_head() -> Response:
-    """Ensure observability checks using HEAD succeed like the root agent."""
-
-    return Response(status_code=200, headers={"Content-Type": CONTENT_TYPE_LATEST})
+    response = craft_summary_response(
+        request,
+        provider=settings.llm_provider,
+        model_id=settings.llm_model_id,
+    )
+    logger.debug("Summary response prepared for task_id=%s", request.task_id)
+    return response
 
 
 if __name__ == "__main__":
     uvicorn.run(app="main:app", host="0.0.0.0", port=settings.port)
-
