@@ -1,10 +1,24 @@
-FROM python:3.12-slim
+# 你在 VPC-only Studio，請用你自己的 ECR 基底鏡像（修改成你有的 tag）
+ARG BASE_IMAGE=182399696164.dkr.ecr.ap-southeast-1.amazonaws.com/python-base/python:3.11-slim
+FROM ${BASE_IMAGE}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN useradd -m appuser
 
-COPY app ./app
+# 安裝相依
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
-CMD ["uvicorn", "app.main:APP", "--host", "0.0.0.0", "--port", "50003"]
+# 複製程式
+COPY app/ ./app
+
+EXPOSE 50003
+
+USER appuser
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "50003"]
