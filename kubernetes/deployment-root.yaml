@@ -24,11 +24,11 @@ spec:
         env:
           # --- 遠端 Agent 連線配置 ---
           - name: REMOTE1_URL # Weather Agent (Agent A / 1)
-            value: "http://remote-agent-1-service"
+            value: "http://remote-agent-1-service:50001"
           - name: REMOTE2_URL # Train Agent (Agent B / 2)
-            value: "http://remote-agent-2-service"
+            value: "http://remote-agent-2-service:50002"
           - name: SUMMARY_URL # Summary Agent (Aggregator)
-            value: "http://summary-agent-service"
+            value: "http://summary-agent-service:50003"
           - name: ROOT_LLM_PROVIDER
             valueFrom:
               configMapKeyRef:

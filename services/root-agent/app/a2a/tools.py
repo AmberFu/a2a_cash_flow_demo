@@ -16,9 +16,9 @@ AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-1")
 # 您實際 Event Bus 的名稱
 EVENT_BUS_NAME = os.getenv("EVENT_BUS_NAME", "a2a-cash-flow-demo-bus")
 
-REMOTE1_URL = os.getenv("REMOTE1_URL", "http://remote-agent-1-service")
-REMOTE2_URL = os.getenv("REMOTE2_URL", "http://remote-agent-2-service")
-SUMMARY_URL = os.getenv("SUMMARY_URL", "http://summary-agent-service")
+REMOTE1_URL = os.getenv("REMOTE1_URL", "http://remote-agent-1-service:50001")
+REMOTE2_URL = os.getenv("REMOTE2_URL", "http://remote-agent-2-service:50002")
+SUMMARY_URL = os.getenv("SUMMARY_URL", "http://summary-agent-service:50003")
 
 WORKFLOW_MODE = os.getenv("A2A_WORKFLOW_MODE", "eventbridge").lower()
 USE_DDB_CHECKPOINTER = os.getenv("A2A_USE_DDB_CHECKPOINTER", "true").lower() == "true"

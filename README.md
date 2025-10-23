@@ -121,7 +121,7 @@ Weather Agent (/weather/report)   Transport Agent (/transport/plans)
 
 * Root Agent 在 `A2A_WORKFLOW_MODE=eventbridge` 下只會將事件送到 EventBridge，Remote Agent 會透過 SQS/EventBridge 的整合接收。若未部署這些 AWS 元件或未執行 Lambda/SQS 接收程式，就不會有 log。
 * 若已切換到本地模式仍看不到 log，請確認：
-  1. `REMOTE1_URL`、`REMOTE2_URL`、`SUMMARY_URL` 是否皆可從 Root Agent 解析。
+  1. `REMOTE1_URL`、`REMOTE2_URL`、`SUMMARY_URL` 是否皆可從 Root Agent 解析（叢集內部署時，預設應為 `http://remote-agent-1-service:50001`、`http://remote-agent-2-service:50002`、`http://summary-agent-service:50003`）。
   2. Remote Agent Pod 是否存活：`kubectl get pods -n a2a-demo`。
   3. HTTP 連線是否成功：嘗試 `curl http://127.0.0.1:50001/weather/report` 等命令確認。
 
