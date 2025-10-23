@@ -100,3 +100,5 @@ spec:
             value: "50000"
           - name: JSONRPC_BASE_PATH
             value: "/jsonrpc"
+          - name: METRICS_ENABLED
+            value: "false"

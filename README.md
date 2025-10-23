@@ -115,7 +115,19 @@ Weather Agent (/weather/report)   Transport Agent (/transport/plans)
 
    若只看到 Root Agent 的 log，通常表示仍在 EventBridge 模式或 HTTP 呼叫失敗。切換模式並檢查 `REMOTE*_URL` 是否指向正確的 ClusterIP/port。
 
-5. **JSON-RPC 測試**：啟用 `JSONRPC_ENABLED=true` 並 port-forward `service-jsonrpc.yaml`（`kubectl port-forward -n a2a-demo service/root-agent-jsonrpc 50000:50000`）後，可用 `services/jsonrpc_gateway/client.py` 送出 `a2a.submit_task` 取得同步結果；同樣會在 log 中看到三個 Remote Agent 的呼叫紀錄。
+5. **JSON-RPC 測試與追蹤**：啟用 `JSONRPC_ENABLED=true` 並 port-forward `service-jsonrpc.yaml`（`kubectl port-forward -n a2a-demo service/root-agent-jsonrpc 50000:50000`）後，可用 `services/jsonrpc_gateway/client.py` 送出 `a2a.submit_task` 取得同步結果。下列步驟可協助確認 Remote Agent 也有收到請求：
+   - 送出請求：
+
+     ```bash
+     python services/jsonrpc_gateway/client.py --endpoint http://127.0.0.1:50000/jsonrpc --method a2a.submit_task \
+       --payload '{"loan_case_id": "demo-jsonrpc-001", "user_requirement": {"origin": "台北", "destination": "台南", "travel_date": "2024-10-25", "desired_arrival_time": "15:30"}}'
+     ```
+
+   - Root Agent 日誌：`kubectl logs deploy/root-agent -n a2a-demo -f | grep "via POST"`，應看到 `Calling Weather Remote Agent via POST` 等訊息，代表 JSON-RPC 任務已轉為 HTTP 呼叫。
+   - Remote Agents 日誌：分別追 `deploy/remote-agent-1`、`deploy/remote-agent-2`、`deploy/summary-agent`，可看到 `Generating weather report`、`Generating transport plans`、`Aggregating remote agent outputs` 等字樣。
+   - 二次驗證：必要時可重送 `curl -X POST` 測試到個別 Remote Agent（參考上方步驟 4），確保 port-forward 仍然有效且服務可回應。
+
+   如需在 JSON-RPC 流程下保留請求與回應紀錄，可啟用 Root Agent 的 `A2A_USE_DDB_CHECKPOINTER=true`，或在 Remote Agent 中自行記錄 request body 與 `task_id`。
 
 ### 為什麼看不到 Remote Agent 的 log？
 
@@ -157,6 +169,16 @@ export METRICS_ENABLED=false  # 停用 Prometheus FastAPI Instrumentator
 ```
 
 停用後服務仍會啟動，但不會自動掛載 `/metrics` 端點。若僅想降低 Prometheus 擷取頻率，請調整 Prometheus 的 `scrape_interval` 或使用服務監控的 annotation（例如 `prometheus.io/scrape: "false"` 或自訂 scrape config）。
+
+### 想加入 Remote Agent 的 `task_id` 狀態查詢？
+
+目前 Weather/Transport/Summary Remote Agents 是 stateless 的同步 API：Root Agent 以 POST 傳遞需求後立即得到結果，沒有將 `task_id` 與輸出寫入資料庫。因此預設沒有提供「查詢特定 `task_id` 狀態」的端點。如果想加入類似能力，可以參考以下做法：
+
+1. 在 Remote Agent 的 FastAPI 應用內新增儲存層（例如 DynamoDB、Redis 或 SQLite），在 `POST /weather/report` 等處理函式中，把輸入的 `task_id` 與生成的結果寫入儲存層。
+2. 新增 `GET /tasks/{task_id}` 或 `GET /status/{task_id}` 端點，從儲存層讀取資料並回傳。
+3. 若希望 Root Agent 仍能即時返回結果，可在保存資料後直接回傳原本的 JSON；同時提供額外的 polling API 給前端或監控工具使用。
+
+上述改動都僅涉及個別 Remote Agent 的程式碼，不會影響 Root Agent 既有的協作流程。建議先在開發環境驗證儲存層與 API 的行為，再視需求部署到 Kubernetes。
 
 ## Agent LLM 模型設定
 
