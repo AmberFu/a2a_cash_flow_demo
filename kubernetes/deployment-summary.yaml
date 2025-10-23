@@ -34,5 +34,7 @@ spec:
             configMapKeyRef:
               name: agent-llm-config
               key: SUMMARY_MODEL_ID
+        - name: METRICS_ENABLED
+          value: "false"
 
 

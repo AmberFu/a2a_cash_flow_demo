@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,6 +15,7 @@ from .models import SummaryRequest, SummaryResponse
 from .summarizer import craft_summary_response
 
 settings = get_settings()
+METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -32,7 +34,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Summary Agent", version="0.2.0", lifespan=lifespan)
-Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+if METRICS_ENABLED:
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+else:
+    logger.info("Prometheus instrumentation disabled via METRICS_ENABLED=false")
 
 
 @app.get("/")

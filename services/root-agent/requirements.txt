@@ -22,3 +22,6 @@ langgraph-checkpoint-amazon-dynamodb[infra]
 # For Redis
 redis
 redis[hiredis]
+
+# HTTP client for local direct mode
+httpx

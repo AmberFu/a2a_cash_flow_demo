@@ -7,11 +7,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
-from pydantic import BaseModel, Field
 import uvicorn
 
 from a2a.graph import get_graph_app
+from a2a import tools as agent_tools
 from langchain_core.messages import HumanMessage, ToolMessage
+from models import (
+    CallbackRequest,
+    CreateTaskRequest,
+    CreateTaskResponse,
+    HITLAnswerRequest,
+    UserRequirement,
+)
 
 
 # --- Application Setup ---
@@ -39,6 +46,7 @@ SUMMARY_MODEL_PROVIDER = os.environ.get("SUMMARY_MODEL_PROVIDER", "bedrock")
 SUMMARY_MODEL_ID = os.environ.get(
     "SUMMARY_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
 )
+METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -63,33 +71,14 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
-Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+if METRICS_ENABLED:
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+else:
+    logger.info("Prometheus instrumentation disabled via METRICS_ENABLED=false")
 
 # Initialize the LangGraph Application
 # This creates the compiled graph with its checkpointer
 graph_app = get_graph_app()
-
-
-# --- API Models ---
-class CreateTaskRequest(BaseModel):
-    loan_case_id: str = Field(..., description="The business identifier for the loan case.")
-
-
-class CreateTaskResponse(BaseModel):
-    task_id: str
-    message: str
-
-
-class CallbackRequest(BaseModel):
-    task_id: str
-    source: str = Field(..., description="e.g., 'remote-agent-a', 'remote-agent-b'")
-    status: str = Field(..., description="The new status to set for the task.")
-    result: Dict[str, Any] = Field(description="The output from the remote agent.")
-    needs_info: Optional[List[str]] = Field(None, description="Questions for HITL, if any.")
-
-
-class HITLAnswerRequest(BaseModel):
-    answer: str = Field(..., description="The human-provided answer or information.")
 
 
 # --- Helper functions ---
@@ -131,10 +120,14 @@ def get_task_state_snapshot(task_id: str) -> Tuple[str, Dict[str, Any]]:
     if not state:
         raise KeyError(task_id)
 
-    if hasattr(state, "values"):
-        values: Dict[str, Any] = getattr(state, "values")
-    elif isinstance(state, dict):
-        values = state
+    if isinstance(state, dict):
+        values: Dict[str, Any] = state
+    elif hasattr(state, "values"):
+        values_attr = getattr(state, "values")
+        if callable(values_attr):
+            values = values_attr()
+        else:
+            values = values_attr
     else:
         values = {"raw": state}
 
@@ -142,7 +135,9 @@ def get_task_state_snapshot(task_id: str) -> Tuple[str, Dict[str, Any]]:
     return status, values
 
 
-async def start_graph_run(loan_case_id: str) -> CreateTaskResponse:
+async def start_graph_run(
+    loan_case_id: str, user_requirement: Optional[UserRequirement]
+) -> CreateTaskResponse:
     task_id = str(uuid.uuid4())
     logger.info(
         "Received request to create task for loan case: %s. Assigned Task ID: %s",
@@ -150,15 +145,35 @@ async def start_graph_run(loan_case_id: str) -> CreateTaskResponse:
         task_id,
     )
     config = {"configurable": {"thread_id": task_id}}
+
+    requirement_payload: Dict[str, Any] = {}
+    if user_requirement is not None:
+        requirement_payload = user_requirement.model_dump()
+
+    travel_summary = (
+        f"Start processing for loan case ID: {loan_case_id}."
+        if not requirement_payload
+        else (
+            "Start processing for loan case ID: "
+            f"{loan_case_id} with travel requirement: {requirement_payload}."
+        )
+    )
     initial_state = {
         "task_id": task_id,
         "loan_case_id": loan_case_id,
         "status": "new",
-        "messages": [HumanMessage(content=f"Start processing for loan case ID: {loan_case_id}")],
+        "messages": [HumanMessage(content=travel_summary)],
+        "needs_info": [],
+        "human_answer": "",
+        "user_requirement": requirement_payload,
+        "weather_report": {},
+        "transport": {},
+        "summary": {},
     }
+    result_state: Optional[Any] = None
     try:
         logger.info(">>> Start graph_app.invoke via start_graph_run...")
-        graph_app.invoke(initial_state, config=config)
+        result_state = graph_app.invoke(initial_state, config=config)
         logger.info(">>> Graph finished")
     except Exception as exc:  # pragma: no cover - runtime safety
         logger.error("Failed to start graph for task %s. Error: %s", task_id, exc)
@@ -169,7 +184,33 @@ async def start_graph_run(loan_case_id: str) -> CreateTaskResponse:
             ) from exc
         raise HTTPException(status_code=500, detail=f"Failed to start workflow: {exc}") from exc
 
-    return CreateTaskResponse(task_id=task_id, message="Task created and workflow initiated.")
+    summary_payload: Optional[Dict[str, Any]] = None
+    status: Optional[str] = None
+    if not agent_tools.is_eventbridge_mode():
+        values: Dict[str, Any] = {}
+        if result_state is not None:
+            if isinstance(result_state, dict):
+                values = result_state
+            elif hasattr(result_state, "values"):
+                values_attr = getattr(result_state, "values")
+                if callable(values_attr):
+                    values = values_attr()
+                else:
+                    values = values_attr
+        summary_payload = values.get("summary")
+        status = values.get("status")
+        if not values:
+            logger.warning(
+                "Task %s returned empty state in local mode; summary may be unavailable",
+                task_id,
+            )
+
+    return CreateTaskResponse(
+        task_id=task_id,
+        message="Task created and workflow initiated.",
+        status=status,
+        summary=summary_payload,
+    )
 
 
 def jsonrpc_error(code: int, message: str, request_id: Any) -> JSONResponse:
@@ -197,10 +238,16 @@ async def handle_jsonrpc_call(method: str, params: Dict[str, Any]) -> Dict[str, 
         loan_case_id = payload.get("loan_case_id") or params.get("loan_case_id")
         if not loan_case_id:
             raise ValueError("loan_case_id is required")
-        response = await start_graph_run(loan_case_id)
+        requirement_payload = payload.get("user_requirement") or params.get("user_requirement")
+        requirement_model: Optional[UserRequirement] = None
+        if requirement_payload:
+            requirement_model = UserRequirement(**requirement_payload)
+        response = await start_graph_run(loan_case_id, requirement_model)
         return {
             "task_id": response.task_id,
             "message": response.message,
+            "status": response.status,
+            "summary": response.summary,
             "channels": ["eventbridge", "jsonrpc"],
         }
     raise NotImplementedError(f"Method {method} not found")
@@ -214,7 +261,7 @@ def read_root():
 
 @app.post("/tasks", response_model=CreateTaskResponse, status_code=202)
 async def create_task(request: CreateTaskRequest):
-    response = await start_graph_run(request.loan_case_id)
+    response = await start_graph_run(request.loan_case_id, request.user_requirement)
     return response
 
 

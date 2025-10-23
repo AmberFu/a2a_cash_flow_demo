@@ -4,14 +4,26 @@ import boto3
 import json
 import os
 import logging
-from typing import Dict, Any
+from datetime import datetime
+from typing import Dict, Any, Optional
+
+import httpx
 
 # --- Configuration ---
 # It's recommended to manage these via environment variables
 # 您的實際區域 ap-southeast-1
-AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-1") 
+AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-1")
 # 您實際 Event Bus 的名稱
-EVENT_BUS_NAME = os.getenv("EVENT_BUS_NAME", "a2a-cash-flow-demo-bus") 
+EVENT_BUS_NAME = os.getenv("EVENT_BUS_NAME", "a2a-cash-flow-demo-bus")
+
+REMOTE1_URL = os.getenv("REMOTE1_URL", "http://remote-agent-1-service:50001")
+REMOTE2_URL = os.getenv("REMOTE2_URL", "http://remote-agent-2-service:50002")
+SUMMARY_URL = os.getenv("SUMMARY_URL", "http://summary-agent-service:50003")
+
+WORKFLOW_MODE = os.getenv("A2A_WORKFLOW_MODE", "eventbridge").lower()
+USE_DDB_CHECKPOINTER = os.getenv("A2A_USE_DDB_CHECKPOINTER", "true").lower() == "true"
+HTTP_TIMEOUT = float(os.getenv("A2A_HTTP_TIMEOUT", "10"))
+DEFAULT_TRANSPORT_RESULTS = int(os.getenv("A2A_TRANSPORT_RESULTS", "3"))
 
 # Initialize boto3 client
 try:
@@ -31,6 +43,17 @@ def dispatch_to_remote_agent(
     """
     Sends a task to a remote agent via AWS EventBridge.
     """
+    if not is_eventbridge_mode():
+        logging.info(
+            "Skipping EventBridge dispatch for task %s because workflow mode is '%s'",
+            task_id,
+            WORKFLOW_MODE,
+        )
+        return {
+            "status": "skipped",
+            "message": "EventBridge mode disabled; running in local direct-call mode.",
+        }
+
     if not eventbridge_client:
         error_msg = "EventBridge client is not initialized."
         logging.error(error_msg)
@@ -71,3 +94,129 @@ def dispatch_to_remote_agent(
         error_message = f"An exception occurred while dispatching task {task_id}: {e}"
         logging.error(error_message)
         return {"status": "error", "message": error_message}
+
+
+def is_eventbridge_mode() -> bool:
+    return WORKFLOW_MODE == "eventbridge"
+
+
+def use_ddb_checkpointer() -> bool:
+    return USE_DDB_CHECKPOINTER
+
+
+def _compute_time_range(requirement: Dict[str, Any]) -> str:
+    explicit = requirement.get("time_range")
+    if explicit:
+        return explicit
+
+    arrival = requirement.get("desired_arrival_time")
+    if arrival:
+        try:
+            hour = int(str(arrival).split(":")[0])
+        except (ValueError, IndexError):
+            hour = None
+        if hour is not None:
+            if hour < 12:
+                return "上午"
+            if hour < 18:
+                return "下午"
+            return "晚上"
+
+    return "全天"
+
+
+def _normalize_arrival_time(value: Optional[str]) -> str:
+    if not value:
+        return "17:00:00"
+
+    text = str(value)
+    if len(text.split(":")) == 2:
+        return f"{text}:00"
+    return text
+
+
+def _default_travel_date(requirement: Dict[str, Any]) -> str:
+    date_value = requirement.get("travel_date")
+    if date_value:
+        return str(date_value)
+    return datetime.utcnow().date().isoformat()
+
+
+def fetch_weather_report(requirement: Dict[str, Any]) -> Dict[str, Any]:
+    payload = {
+        "city": requirement.get("destination") or requirement.get("origin") or "台北",
+        "date": _default_travel_date(requirement),
+        "time_range": _compute_time_range(requirement),
+    }
+    endpoint = f"{REMOTE1_URL.rstrip('/')}/weather/report"
+    logging.info("Calling Weather Remote Agent via POST: %s", endpoint)
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
+            response = client.post(endpoint, json=payload)
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPError as exc:
+        logging.error("Weather agent call failed: %s", exc)
+        raise RuntimeError(f"Weather agent request failed: {exc}") from exc
+
+    logging.debug("Weather agent response: %s", data)
+    return data
+
+
+def fetch_transport_plans(requirement: Dict[str, Any]) -> Dict[str, Any]:
+    payload = {
+        "destination": requirement.get("destination") or "台北",
+        "arrival_time": _normalize_arrival_time(requirement.get("desired_arrival_time")),
+        "date": _default_travel_date(requirement),
+        "results": requirement.get("transport_results", DEFAULT_TRANSPORT_RESULTS),
+    }
+    endpoint = f"{REMOTE2_URL.rstrip('/')}/transport/plans"
+    logging.info("Calling Transport Remote Agent via POST: %s", endpoint)
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
+            response = client.post(endpoint, json=payload)
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPError as exc:
+        logging.error("Transport agent call failed: %s", exc)
+        raise RuntimeError(f"Transport agent request failed: {exc}") from exc
+
+    logging.debug("Transport agent response: %s", data)
+    return data
+
+
+def request_summary(
+    task_id: str,
+    requirement: Dict[str, Any],
+    weather_report: Dict[str, Any],
+    transport_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    payload = {
+        "task_id": task_id,
+        "user_requirement": {
+            "origin": requirement.get("origin") or "台北",
+            "destination": requirement.get("destination")
+            or weather_report.get("city")
+            or "台北",
+            "travel_date": _default_travel_date(requirement),
+            "desired_arrival_time": _normalize_arrival_time(
+                requirement.get("desired_arrival_time")
+            ),
+            "transport_note": requirement.get("transport_note"),
+        },
+        "weather_report": weather_report,
+        "transport": transport_payload,
+    }
+    endpoint = f"{SUMMARY_URL.rstrip('/')}/summaries"
+    logging.info("Calling Summary Agent via POST: %s", endpoint)
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
+            response = client.post(endpoint, json=payload)
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPError as exc:
+        logging.error("Summary agent call failed: %s", exc)
+        raise RuntimeError(f"Summary agent request failed: {exc}") from exc
+
+    logging.debug("Summary agent response: %s", data)
+    return data
