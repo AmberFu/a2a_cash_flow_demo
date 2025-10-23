@@ -108,14 +108,14 @@ Weather Agent (/weather/report)   Transport Agent (/transport/plans)
    ```
 
 4. **查閱 Log 確認訊息流向**：
-   - Root Agent：`kubectl logs deploy/root-agent -n a2a-demo -f | grep "Calling"` 可看到 `Calling Weather Remote Agent` / `Calling Transport Remote Agent` / `Calling Summary Agent` 訊息。
+   - Root Agent：`kubectl logs deploy/root-agent -n a2a-demo -f | grep "Calling"` 可看到 `Calling Weather Remote Agent via POST` / `Calling Transport Remote Agent via POST` / `Calling Summary Agent via POST` 訊息。
    - Weather Agent：`kubectl logs deploy/remote-agent-1 -n a2a-demo -f | grep Generating`。
    - Transport Agent：`kubectl logs deploy/remote-agent-2 -n a2a-demo -f | grep Generating`。
    - Summary Agent：`kubectl logs deploy/summary-agent -n a2a-demo -f | grep Generating`。
 
    若只看到 Root Agent 的 log，通常表示仍在 EventBridge 模式或 HTTP 呼叫失敗。切換模式並檢查 `REMOTE*_URL` 是否指向正確的 ClusterIP/port。
 
-5. **JSON-RPC 測試**：啟用 `JSONRPC_ENABLED=true` 並 port-forward `service-jsonrpc.yaml` 後，可用 `services/jsonrpc_gateway/client.py` 送出 `a2a.submit_task` 取得同步結果；同樣會在 log 中看到三個 Remote Agent 的呼叫紀錄。
+5. **JSON-RPC 測試**：啟用 `JSONRPC_ENABLED=true` 並 port-forward `service-jsonrpc.yaml`（`kubectl port-forward -n a2a-demo service/root-agent-jsonrpc 50000:50000`）後，可用 `services/jsonrpc_gateway/client.py` 送出 `a2a.submit_task` 取得同步結果；同樣會在 log 中看到三個 Remote Agent 的呼叫紀錄。
 
 ### 為什麼看不到 Remote Agent 的 log？
 
@@ -140,7 +140,7 @@ Weather Agent (/weather/report)   Transport Agent (/transport/plans)
 ### `GET /weathar/report` 405 Method Not Allowed 排除方式
 
 * Weather Remote Agent 只提供 `POST /weather/report` 端點；若以 GET 方法測試（或路徑拼寫為 `weathar`），FastAPI 會回傳 405。
-* 檢查 Root Agent log（`kubectl logs deploy/root-agent -n a2a-demo -f | grep "Calling Weather"`）應可看到 `Calling Weather Remote Agent: http://…/weather/report`，代表 Root Agent 會使用 POST 發送。【F:services/root-agent/app/a2a/tools.py†L145-L163】
+* 檢查 Root Agent log（`kubectl logs deploy/root-agent -n a2a-demo -f | grep "Calling Weather"`）應可看到 `Calling Weather Remote Agent via POST: http://…/weather/report`，代表 Root Agent 會使用 POST 發送。【F:services/root-agent/app/a2a/tools.py†L145-L163】
 * 若仍出現 405，請再次確認：
   1. `REMOTE1_URL` 是否被錯誤設定成帶有 `/weathar` 等子路徑，導致實際請求路徑錯誤。
   2. 手動測試時務必傳送 POST 並附上 JSON 主體（如上範例）。
@@ -191,7 +191,7 @@ data:
 
 ## JSON-RPC over HTTPS 架構與設定
 
-* `kubernetes/service-jsonrpc.yaml`：在叢集中建立指向 Root Agent Pod 的 `ClusterIP` Service，標記為 `app: root-agent` 與 `component: jsonrpc`。這個 Service 提供一個穩定的 DNS (`root-agent-jsonrpc.a2a-demo.svc.cluster.local`)，讓 JSON-RPC 請求可以在叢集內（Pod-to-Pod）直接呼叫 Root Agent 的 `/jsonrpc` 端點，也方便透過 `kubectl port-forward` 在測試時對 Root Agent 發送請求。
+* `kubernetes/service-jsonrpc.yaml`：在叢集中建立指向 Root Agent Pod 的 `ClusterIP` Service，標記為 `app: root-agent` 與 `component: jsonrpc`，並與主要 HTTP 服務一樣綁定在 `50000` port。這個 Service 提供一個穩定的 DNS (`root-agent-jsonrpc.a2a-demo.svc.cluster.local`)，讓 JSON-RPC 請求可以在叢集內（Pod-to-Pod）直接呼叫 Root Agent 的 `/jsonrpc` 端點，也方便透過 `kubectl port-forward` 在測試時對 Root Agent 發送請求。
 * `services/jsonrpc_gateway/`：提供 JSON-RPC 伺服器與客戶端範例程式碼，協助驗證同步通道。同一資料夾的 README 說明如何準備測試憑證（`jsonrpc.crt`/`jsonrpc.key`）與執行測試腳本。
 
 ### 取得並設定 certificate-arn 與 hostname（選用）

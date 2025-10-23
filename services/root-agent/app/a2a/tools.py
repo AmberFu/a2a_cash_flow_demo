@@ -149,7 +149,7 @@ def fetch_weather_report(requirement: Dict[str, Any]) -> Dict[str, Any]:
         "time_range": _compute_time_range(requirement),
     }
     endpoint = f"{REMOTE1_URL.rstrip('/')}/weather/report"
-    logging.info("Calling Weather Remote Agent: %s", endpoint)
+    logging.info("Calling Weather Remote Agent via POST: %s", endpoint)
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT) as client:
             response = client.post(endpoint, json=payload)
@@ -171,7 +171,7 @@ def fetch_transport_plans(requirement: Dict[str, Any]) -> Dict[str, Any]:
         "results": requirement.get("transport_results", DEFAULT_TRANSPORT_RESULTS),
     }
     endpoint = f"{REMOTE2_URL.rstrip('/')}/transport/plans"
-    logging.info("Calling Transport Remote Agent: %s", endpoint)
+    logging.info("Calling Transport Remote Agent via POST: %s", endpoint)
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT) as client:
             response = client.post(endpoint, json=payload)
@@ -208,7 +208,7 @@ def request_summary(
         "transport": transport_payload,
     }
     endpoint = f"{SUMMARY_URL.rstrip('/')}/summaries"
-    logging.info("Calling Summary Agent: %s", endpoint)
+    logging.info("Calling Summary Agent via POST: %s", endpoint)
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT) as client:
             response = client.post(endpoint, json=payload)
