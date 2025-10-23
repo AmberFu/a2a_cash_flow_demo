@@ -15,6 +15,7 @@ a2a-ds-cashflow-demo/
 │   └─ root-agent/                    # Root Agent FastAPI 應用，支援 JSON-RPC 與 EventBridge/SQS
 │       └─ app/
 │           ├─ main.py
+│           ├─ models.py
 │           └─ a2a/
 │               ├─ graph.py
 │               └─ tools.py
@@ -51,6 +52,88 @@ a2a-ds-cashflow-demo/
 4. **回傳結果**：Root Agent 收到下游輸出後會進行彙整（必要時由 Summary Agent 協助），並將整體回覆返回給使用者或上游系統。
 
 這個流程讓 Root Agent 能夠集中協調多個專責的 Remote Agents，同時保持各服務的獨立部署與測試流程。
+
+```
+使用者/測試客戶端
+        │  POST /tasks 或 JSON-RPC
+        ▼
+    Root Agent
+   ┌────┴──────────────────────────┐
+   │                                │
+   │HTTP 呼叫                       │HTTP 呼叫
+   ▼                                ▼
+Weather Agent (/weather/report)   Transport Agent (/transport/plans)
+   │                                │
+   └──────────────┬────────────────┘
+                  ▼ HTTP 呼叫
+            Summary Agent (/summaries)
+                  │
+                  ▼
+             Root Agent 整合回傳
+```
+
+### 如何在本地端跑完整流程並觀察 Remote Agents
+
+1. **啟動或 Port-Forward 服務**：
+   - Root Agent：`kubectl port-forward -n a2a-demo service/root-agent-service 50000:50000`
+   - Weather Agent：`kubectl port-forward -n a2a-demo service/remote-agent-1-service 50001:50001`
+   - Transport Agent：`kubectl port-forward -n a2a-demo service/remote-agent-2-service 50002:50002`
+   - Summary Agent：`kubectl port-forward -n a2a-demo service/summary-agent-service 50003:50003`
+   若 Root Agent 與 Remote Agents 同樣在叢集內執行，只有對外測試時才需要 port-forward；叢集內部呼叫會直接透過上述 Service DNS。
+
+2. **切換 Root Agent 為本地直接呼叫模式**：預設 `A2A_WORKFLOW_MODE=eventbridge` 會將事件送到 AWS EventBridge，需要完整的 EventBridge + SQS/DynamoDB 流程才能看到 Remote Agent 的輸入。若僅需在本地驗證 HTTP 呼叫，請以環境變數覆寫：
+
+   ```bash
+   export A2A_WORKFLOW_MODE=local
+   export A2A_USE_DDB_CHECKPOINTER=false  # 若沒有設定 DynamoDB 也可以關閉
+   ```
+
+   重新啟動 Root Agent 後，它會直接以 HTTP 呼叫 Remote Agent 服務並在同一個回應中回傳 Summary。
+
+3. **發送測試請求**：
+
+   ```bash
+   curl -s -X POST http://127.0.0.1:50000/tasks \
+     -H "Content-Type: application/json" \
+     -d '{
+           "loan_case_id": "demo-case-001",
+           "user_requirement": {
+             "origin": "台北",
+             "destination": "台南",
+             "travel_date": "2024-10-25",
+             "desired_arrival_time": "15:30",
+             "transport_note": "希望下午抵達參加會議"
+           }
+         }'
+   ```
+
+4. **查閱 Log 確認訊息流向**：
+   - Root Agent：`kubectl logs deploy/root-agent -n a2a-demo -f | grep "Calling"` 可看到 `Calling Weather Remote Agent` / `Calling Transport Remote Agent` / `Calling Summary Agent` 訊息。
+   - Weather Agent：`kubectl logs deploy/remote-agent-1 -n a2a-demo -f | grep Generating`。
+   - Transport Agent：`kubectl logs deploy/remote-agent-2 -n a2a-demo -f | grep Generating`。
+   - Summary Agent：`kubectl logs deploy/summary-agent -n a2a-demo -f | grep Generating`。
+
+   若只看到 Root Agent 的 log，通常表示仍在 EventBridge 模式或 HTTP 呼叫失敗。切換模式並檢查 `REMOTE*_URL` 是否指向正確的 ClusterIP/port。
+
+5. **JSON-RPC 測試**：啟用 `JSONRPC_ENABLED=true` 並 port-forward `service-jsonrpc.yaml` 後，可用 `services/jsonrpc_gateway/client.py` 送出 `a2a.submit_task` 取得同步結果；同樣會在 log 中看到三個 Remote Agent 的呼叫紀錄。
+
+### 為什麼看不到 Remote Agent 的 log？
+
+* Root Agent 在 `A2A_WORKFLOW_MODE=eventbridge` 下只會將事件送到 EventBridge，Remote Agent 會透過 SQS/EventBridge 的整合接收。若未部署這些 AWS 元件或未執行 Lambda/SQS 接收程式，就不會有 log。
+* 若已切換到本地模式仍看不到 log，請確認：
+  1. `REMOTE1_URL`、`REMOTE2_URL`、`SUMMARY_URL` 是否皆可從 Root Agent 解析。
+  2. Remote Agent Pod 是否存活：`kubectl get pods -n a2a-demo`。
+  3. HTTP 連線是否成功：嘗試 `curl http://127.0.0.1:50001/weather/report` 等命令確認。
+
+### 控制 `/metrics` 擷取頻率或停用
+
+所有 FastAPI 服務都已支援 `METRICS_ENABLED` 環境變數：
+
+```bash
+export METRICS_ENABLED=false  # 停用 Prometheus FastAPI Instrumentator
+```
+
+停用後服務仍會啟動，但不會自動掛載 `/metrics` 端點。若僅想降低 Prometheus 擷取頻率，請調整 Prometheus 的 `scrape_interval` 或使用服務監控的 annotation（例如 `prometheus.io/scrape: "false"` 或自訂 scrape config）。
 
 ## Agent LLM 模型設定
 

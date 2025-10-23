@@ -7,12 +7,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
-from pydantic import BaseModel, Field
 import uvicorn
 
 from a2a.graph import get_graph_app
 from a2a import tools as agent_tools
 from langchain_core.messages import HumanMessage, ToolMessage
+from models import (
+    CallbackRequest,
+    CreateTaskRequest,
+    CreateTaskResponse,
+    HITLAnswerRequest,
+    UserRequirement,
+)
 
 
 # --- Application Setup ---
@@ -40,6 +46,7 @@ SUMMARY_MODEL_PROVIDER = os.environ.get("SUMMARY_MODEL_PROVIDER", "bedrock")
 SUMMARY_MODEL_ID = os.environ.get(
     "SUMMARY_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
 )
+METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -64,58 +71,14 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
-Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+if METRICS_ENABLED:
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+else:
+    logger.info("Prometheus instrumentation disabled via METRICS_ENABLED=false")
 
 # Initialize the LangGraph Application
 # This creates the compiled graph with its checkpointer
 graph_app = get_graph_app()
-
-
-# --- API Models ---
-class UserRequirement(BaseModel):
-    origin: str = Field(..., description="User's starting point.")
-    destination: str = Field(..., description="Where the user wants to travel.")
-    travel_date: str = Field(..., description="Target travel date in YYYY-MM-DD format.")
-    desired_arrival_time: str = Field(..., description="Preferred arrival time in HH:MM format.")
-    time_range: Optional[str] = Field(
-        None,
-        description="High level time range hint such as '上午', '下午', '晚上'.",
-    )
-    transport_note: Optional[str] = Field(
-        None,
-        description="Additional note or preference provided by the user.",
-    )
-
-
-class CreateTaskRequest(BaseModel):
-    loan_case_id: str = Field(..., description="The business identifier for the loan case.")
-    user_requirement: Optional[UserRequirement] = Field(
-        None,
-        description="Optional structured travel requirement used for local end-to-end tests.",
-    )
-
-
-class CreateTaskResponse(BaseModel):
-    task_id: str
-    message: str
-    status: Optional[str] = Field(
-        None, description="Workflow status when the request returns."
-    )
-    summary: Optional[Dict[str, Any]] = Field(
-        None, description="Final summary payload when running in local synchronous mode."
-    )
-
-
-class CallbackRequest(BaseModel):
-    task_id: str
-    source: str = Field(..., description="e.g., 'remote-agent-a', 'remote-agent-b'")
-    status: str = Field(..., description="The new status to set for the task.")
-    result: Dict[str, Any] = Field(description="The output from the remote agent.")
-    needs_info: Optional[List[str]] = Field(None, description="Questions for HITL, if any.")
-
-
-class HITLAnswerRequest(BaseModel):
-    answer: str = Field(..., description="The human-provided answer or information.")
 
 
 # --- Helper functions ---

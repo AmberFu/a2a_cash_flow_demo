@@ -15,6 +15,7 @@ from models import WeatherReportRequest, WeatherReportResponse
 from weather_generator import generate_city_weather_variables
 
 PORT = int(os.environ.get("PORT", 50001))
+METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -41,7 +42,10 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
-Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+if METRICS_ENABLED:
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+else:
+    logger.info("Prometheus instrumentation disabled via METRICS_ENABLED=false")
 
 
 @app.get("/")

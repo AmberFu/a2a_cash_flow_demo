@@ -25,6 +25,7 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "bedrock")
 LLM_MODEL_ID = os.environ.get(
     "LLM_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
 )
+METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
 
 
 @asynccontextmanager
@@ -41,7 +42,10 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
-Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+if METRICS_ENABLED:
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+else:
+    logger.info("Prometheus instrumentation disabled via METRICS_ENABLED=false")
 
 
 @app.get("/")
