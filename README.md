@@ -123,7 +123,30 @@ Weather Agent (/weather/report)   Transport Agent (/transport/plans)
 * 若已切換到本地模式仍看不到 log，請確認：
   1. `REMOTE1_URL`、`REMOTE2_URL`、`SUMMARY_URL` 是否皆可從 Root Agent 解析（叢集內部署時，預設應為 `http://remote-agent-1-service:50001`、`http://remote-agent-2-service:50002`、`http://summary-agent-service:50003`）。
   2. Remote Agent Pod 是否存活：`kubectl get pods -n a2a-demo`。
-  3. HTTP 連線是否成功：嘗試 `curl http://127.0.0.1:50001/weather/report` 等命令確認。
+  3. HTTP 連線是否成功：請以 **POST** 方法測試，例如：
+
+     ```bash
+     curl -s -X POST http://127.0.0.1:50001/weather/report \
+       -H "Content-Type: application/json" \
+       -d '{
+             "city": "台南",
+             "date": "2024-10-25",
+             "time_range": "下午"
+           }'
+     ```
+
+     若看到 JSON 回應表示 Remote Agent 已正確收到請求，並會在 log 中輸出 `Generating weather report` 字樣。
+
+### `GET /weathar/report` 405 Method Not Allowed 排除方式
+
+* Weather Remote Agent 只提供 `POST /weather/report` 端點；若以 GET 方法測試（或路徑拼寫為 `weathar`），FastAPI 會回傳 405。
+* 檢查 Root Agent log（`kubectl logs deploy/root-agent -n a2a-demo -f | grep "Calling Weather"`）應可看到 `Calling Weather Remote Agent: http://…/weather/report`，代表 Root Agent 會使用 POST 發送。【F:services/root-agent/app/a2a/tools.py†L145-L163】
+* 若仍出現 405，請再次確認：
+  1. `REMOTE1_URL` 是否被錯誤設定成帶有 `/weathar` 等子路徑，導致實際請求路徑錯誤。
+  2. 手動測試時務必傳送 POST 並附上 JSON 主體（如上範例）。
+  3. 查看 Remote Agent log 內是否有 `Generating weather report for city=…` 之類的訊息，確定程式有進入處理函式。【F:services/remote-agent-1/app/main.py†L69-L92】
+
+完成以上檢查後，重新透過 Root Agent 發送一次 `/tasks` 請求，並對照 Root Agent 與 Weather Agent 的 log，即可確認訊息流向正常。
 
 ### 控制 `/metrics` 擷取頻率或停用
 
