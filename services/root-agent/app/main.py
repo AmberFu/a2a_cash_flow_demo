@@ -1,7 +1,10 @@
 from contextlib import asynccontextmanager
+import json
 import logging
 import os
+import time
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Request
@@ -48,10 +51,74 @@ SUMMARY_MODEL_ID = os.environ.get(
 )
 METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-)
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+
+class CloudWatchJsonFormatter(logging.Formatter):
+    """Emit JSON logs so CloudWatch can filter on structured fields like task_id."""
+
+    #: Attributes automatically added by the logging module that should not be
+    #: copied into the JSON payload.
+    _RESERVED_ATTRS = {
+        "args",
+        "asctime",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "levelname",
+        "levelno",
+        "lineno",
+        "module",
+        "msecs",
+        "message",
+        "msg",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "thread",
+        "threadName",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.converter = time.gmtime
+
+    def format(self, record: logging.LogRecord) -> str:  # pragma: no cover - formatting logic
+        payload = {
+            "timestamp": datetime.utcfromtimestamp(record.created).isoformat(timespec="milliseconds") + "Z",
+            "level": record.levelname,
+            "logger": record.name,
+            "filename": record.filename,
+            "lineno": record.lineno,
+            "message": record.getMessage(),
+        }
+
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+
+        for attr, value in record.__dict__.items():
+            if attr in self._RESERVED_ATTRS or attr.startswith("_"):
+                continue
+            payload[attr] = value
+
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def configure_logging() -> None:
+    handler = logging.StreamHandler()
+    handler.setFormatter(CloudWatchJsonFormatter())
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.addHandler(handler)
+    root_logger.setLevel(LOG_LEVEL)
+
+
+configure_logging()
 logging.getLogger("langgraph").setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -229,7 +296,12 @@ async def start_graph_run(
             extra={"task_id": task_id, "workflow_mode": workflow_mode},
         )
     except Exception as exc:  # pragma: no cover - runtime safety
-        logger.error("Failed to start graph for task %s. Error: %s", task_id, exc)
+        logger.error(
+            "Failed to start graph for task %s. Error: %s",
+            task_id,
+            exc,
+            extra={"task_id": task_id, "workflow_mode": workflow_mode},
+        )
         if "events" in str(exc) or "PutEvents" in str(exc):
             raise HTTPException(
                 status_code=503,
@@ -256,6 +328,7 @@ async def start_graph_run(
             logger.warning(
                 "Task %s returned empty state in local mode; summary may be unavailable",
                 task_id,
+                extra={"task_id": task_id, "workflow_mode": workflow_mode},
             )
 
     return CreateTaskResponse(
@@ -373,7 +446,12 @@ async def handle_callback(request: CallbackRequest):
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - runtime safety
-        logger.error("Error processing callback for task %s. Error: %s", task_id, exc)
+        logger.error(
+            "Error processing callback for task %s. Error: %s",
+            task_id,
+            exc,
+            extra={"task_id": task_id, "source": request.source},
+        )
         raise HTTPException(status_code=500, detail=f"Failed to process callback: {exc}") from exc
 
     logger.info(
@@ -425,7 +503,12 @@ async def submit_hitl_answer(task_id: str, request: HITLAnswerRequest):
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - runtime safety
-        logger.error("Error processing HITL answer for task %s. Error: %s", task_id, exc)
+        logger.error(
+            "Error processing HITL answer for task %s. Error: %s",
+            task_id,
+            exc,
+            extra={"task_id": task_id},
+        )
         raise HTTPException(status_code=500, detail=f"Failed to process HITL answer: {exc}") from exc
 
     logger.info(

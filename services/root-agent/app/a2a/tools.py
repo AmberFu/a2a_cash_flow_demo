@@ -59,7 +59,12 @@ def dispatch_to_remote_agent(
 
     if not eventbridge_client:
         error_msg = "EventBridge client is not initialized."
-        logger.error("[Task %s][EventBridge][Error] %s", task_id, error_msg)
+        logger.error(
+            "[Task %s][EventBridge][Error] %s",
+            task_id,
+            error_msg,
+            extra={"task_id": task_id},
+        )
         return {"status": "error", "message": error_msg}
 
     event_detail = {

@@ -1,13 +1,15 @@
 # a2a_cash_flow_demo/services/root-agent/app/a2a/graph.py
 
-import os
 import logging
 import operator
-from typing import TypedDict, Annotated, List, Dict, Any
-from langgraph.graph import StateGraph, END
-from langchain_core.messages import BaseMessage, AIMessage
-from langgraph_checkpoint_dynamodb import DynamoDBSaver, DynamoDBConfig, DynamoDBTableConfig
-import redis 
+import os
+from typing import Annotated, Any, Dict, List, TypedDict
+
+import redis
+from langchain_core.messages import AIMessage, BaseMessage
+from langgraph.graph import END, StateGraph
+from langgraph_checkpoint_dynamodb import DynamoDBConfig, DynamoDBSaver, DynamoDBTableConfig
+
 from . import tools
 
 # --- 從環境變數讀取配置 ---
@@ -18,12 +20,6 @@ DDB_TABLE_NAME = os.environ.get("DDB_A2A_TASKS_TABLE_NAME", "ds_demo_a2a_tasks")
 # REDIS_HOST = os.environ.get("REDIS_HOST")
 # REDIS_PORT = os.environ.get("REDIS_PORT", "6379")
 
-# --- Logging Configuration ---
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
-)
-logging.getLogger("langgraph").setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # --- State Definition ---
@@ -43,18 +39,23 @@ class AgentState(TypedDict):
 
 def start_node(state: AgentState) -> dict:
     """Entry point of the graph. Dispatches the first task."""
-    logging.info(
+    logger.info(
         "[Task %s][Step 2] start_node entered (loan_case_id=%s)",
         state["task_id"],
         state["loan_case_id"],
+        extra={"task_id": state["task_id"], "loan_case_id": state["loan_case_id"]},
     )
 
-    logger.debug("Enter node=start_node", extra={"state": state})
+    logger.debug(
+        "Enter node=start_node",
+        extra={"task_id": state["task_id"], "state": state},
+    )
 
     if tools.is_eventbridge_mode():
-        logging.info(
+        logger.info(
             "[Task %s][Step 2] Dispatching Remote Agent A via EventBridge",
             state["task_id"],
+            extra={"task_id": state["task_id"], "loan_case_id": state["loan_case_id"]},
         )
         dispatch_result = tools.dispatch_to_remote_agent(
             task_id=state["task_id"],
@@ -69,23 +70,32 @@ def start_node(state: AgentState) -> dict:
         else:
             new_status = "recognizing_transactions"
             message = AIMessage(content="Task has been dispatched to Remote Agent A to recognize transaction details. Awaiting callback.")
-        logging.info(
+        logger.info(
             "[Task %s][Step 2] start_node exiting with status=%s",
             state["task_id"],
             new_status,
+            extra={"task_id": state["task_id"], "status": new_status},
         )
-        logger.debug("Leave node=start_node")
+        logger.debug(
+            "Leave node=start_node",
+            extra={"task_id": state["task_id"]},
+        )
         return {"status": new_status, "messages": [message]}
 
     # Local direct-call mode: invoke Remote Agent 1 immediately
     try:
-        logging.info(
+        logger.info(
             "[Task %s][Step 2] Calling Weather Remote Agent via HTTP",
             state["task_id"],
+            extra={"task_id": state["task_id"]},
         )
         weather_report = tools.fetch_weather_report(state["task_id"], state.get("user_requirement", {}))
     except Exception as exc:  # pragma: no cover - runtime safety for local mode
-        logger.error("Weather agent invocation failed: %s", exc)
+        logger.error(
+            "Weather agent invocation failed: %s",
+            exc,
+            extra={"task_id": state["task_id"]},
+        )
         message = AIMessage(content=f"Weather agent invocation failed: {exc}")
         return {"status": "error_remote1", "messages": [message]}
 
@@ -96,11 +106,15 @@ def start_node(state: AgentState) -> dict:
         )
     )
 
-    logging.info(
+    logger.info(
         "[Task %s][Step 2] start_node completed weather analysis",
         state["task_id"],
+        extra={"task_id": state["task_id"]},
     )
-    logger.debug("Leave node=start_node")
+    logger.debug(
+        "Leave node=start_node",
+        extra={"task_id": state["task_id"], "state": state},
+    )
 
     return {
         "status": "transactions_recognized",
@@ -110,17 +124,22 @@ def start_node(state: AgentState) -> dict:
 
 def draft_response_node(state: AgentState) -> dict:
     """Dispatches task to Remote Agent B to draft a customer response."""
-    logging.info(
+    logger.info(
         "[Task %s][Step 3] draft_response_node entered",
         state["task_id"],
+        extra={"task_id": state["task_id"], "loan_case_id": state["loan_case_id"]},
     )
 
-    logger.debug("Enter node=draft_response_node", extra={"state": state})
+    logger.debug(
+        "Enter node=draft_response_node",
+        extra={"task_id": state["task_id"], "state": state},
+    )
 
     if tools.is_eventbridge_mode():
-        logging.info(
+        logger.info(
             "[Task %s][Step 3] Dispatching Remote Agent B via EventBridge",
             state["task_id"],
+            extra={"task_id": state["task_id"], "loan_case_id": state["loan_case_id"]},
         )
         dispatch_result = tools.dispatch_to_remote_agent(
             task_id=state["task_id"],
@@ -136,23 +155,32 @@ def draft_response_node(state: AgentState) -> dict:
             new_status = "drafting_response"
             message = AIMessage(content="Task has been dispatched to Remote Agent B to draft a response. Awaiting callback.")
 
-        logging.info(
+        logger.info(
             "[Task %s][Step 3] draft_response_node exiting with status=%s",
             state["task_id"],
             new_status,
+            extra={"task_id": state["task_id"], "status": new_status},
         )
-        logger.debug("Leave node=draft_response_node")
+        logger.debug(
+            "Leave node=draft_response_node",
+            extra={"task_id": state["task_id"]},
+        )
 
         return {"status": new_status, "messages": [message]}
 
     try:
-        logging.info(
+        logger.info(
             "[Task %s][Step 3] Calling Transport Remote Agent via HTTP",
             state["task_id"],
+            extra={"task_id": state["task_id"]},
         )
         transport_payload = tools.fetch_transport_plans(state["task_id"], state.get("user_requirement", {}))
     except Exception as exc:  # pragma: no cover - runtime safety for local mode
-        logger.error("Transport agent invocation failed: %s", exc)
+        logger.error(
+            "Transport agent invocation failed: %s",
+            exc,
+            extra={"task_id": state["task_id"]},
+        )
         message = AIMessage(content=f"Transport agent invocation failed: {exc}")
         return {"status": "error_remote2", "messages": [message]}
 
@@ -163,11 +191,15 @@ def draft_response_node(state: AgentState) -> dict:
         )
     )
 
-    logging.info(
+    logger.info(
         "[Task %s][Step 3] draft_response_node completed transport planning",
         state["task_id"],
+        extra={"task_id": state["task_id"]},
     )
-    logger.debug("Leave node=draft_response_node", extra={"state": state})
+    logger.debug(
+        "Leave node=draft_response_node",
+        extra={"task_id": state["task_id"], "state": state},
+    )
 
     return {
         "status": "response_drafted",
@@ -177,39 +209,55 @@ def draft_response_node(state: AgentState) -> dict:
 
 def human_in_the_loop_node(state: AgentState) -> dict:
     """Pauses the graph and waits for human input."""
-    logging.info(
+    logger.info(
         "[Task %s][Step HITL] human_in_the_loop_node entered",
         state["task_id"],
+        extra={"task_id": state["task_id"], "needs_info": state.get("needs_info")},
     )
 
-    logger.debug("Enter node=human_in_the_loop_node", extra={"state": state})
+    logger.debug(
+        "Enter node=human_in_the_loop_node",
+        extra={"task_id": state["task_id"], "state": state},
+    )
 
     message = AIMessage(content=f"Awaiting human input for the following: {state['needs_info']}")
 
-    logging.info(
+    logger.info(
         "[Task %s][Step HITL] human_in_the_loop_node exiting (awaiting input)",
         state["task_id"],
+        extra={"task_id": state["task_id"], "needs_info": state.get("needs_info")},
     )
-    logger.debug("Leave node=human_in_the_loop_node")
+    logger.debug(
+        "Leave node=human_in_the_loop_node",
+        extra={"task_id": state["task_id"]},
+    )
 
     return {"status": "awaiting_human_input", "messages": [message]}
 
 def finish_node(state: AgentState) -> dict:
     """Marks the task as complete."""
-    logging.info(
+    logger.info(
         "[Task %s][Step 4] finish_node entered",
         state["task_id"],
+        extra={"task_id": state["task_id"], "status": state.get("status")},
     )
 
-    logger.debug("Enter node=finish_node", extra={"state": state})
+    logger.debug(
+        "Enter node=finish_node",
+        extra={"task_id": state["task_id"], "state": state},
+    )
 
     if tools.is_eventbridge_mode():
         message = AIMessage(content="The process has been successfully completed.")
-        logging.info(
+        logger.info(
             "[Task %s][Step 4] finish_node exiting with status=completed (eventbridge mode)",
             state["task_id"],
+            extra={"task_id": state["task_id"], "status": "completed"},
         )
-        logger.debug("Leave node=finish_node")
+        logger.debug(
+            "Leave node=finish_node",
+            extra={"task_id": state["task_id"]},
+        )
         return {"status": "completed", "messages": [message]}
 
     requirement = state.get("user_requirement", {})
@@ -218,7 +266,10 @@ def finish_node(state: AgentState) -> dict:
 
     if not weather_report or not transport_payload:
         message = AIMessage(content="Missing prerequisite data from remote agents to build summary.")
-        logger.debug("Leave node=finish_node")
+        logger.debug(
+            "Leave node=finish_node",
+            extra={"task_id": state["task_id"]},
+        )
         return {"status": "error_summary", "messages": [message]}
 
     try:
@@ -226,18 +277,29 @@ def finish_node(state: AgentState) -> dict:
             state["task_id"], requirement, weather_report, transport_payload
         )
     except Exception as exc:  # pragma: no cover - runtime safety
-        logger.error("Summary agent invocation failed: %s", exc)
+        logger.error(
+            "Summary agent invocation failed: %s",
+            exc,
+            extra={"task_id": state["task_id"]},
+        )
         message = AIMessage(content=f"Summary agent invocation failed: {exc}")
-        logger.debug("Leave node=finish_node")
+        logger.debug(
+            "Leave node=finish_node",
+            extra={"task_id": state["task_id"]},
+        )
         return {"status": "error_summary", "messages": [message]}
 
     message = AIMessage(content=summary_payload.get("overview", ""))
 
-    logging.info(
+    logger.info(
         "[Task %s][Step 4] finish_node exiting with summary prepared",
         state["task_id"],
+        extra={"task_id": state["task_id"], "status": "completed"},
     )
-    logger.debug("Leave node=finish_node")
+    logger.debug(
+        "Leave node=finish_node",
+        extra={"task_id": state["task_id"], "state": state},
+    )
 
     return {"status": "completed", "messages": [message], "summary": summary_payload}
 
@@ -245,10 +307,11 @@ def finish_node(state: AgentState) -> dict:
 
 def router(state: AgentState) -> str:
     """Determines the next step in the workflow."""
-    logging.info(
+    logger.info(
         "[Task %s][Router] Evaluating next node based on status='%s'",
         state["task_id"],
         state["status"],
+        extra={"task_id": state["task_id"], "status": state.get("status")},
     )
 
     if state["status"] == "awaiting_human_input":
