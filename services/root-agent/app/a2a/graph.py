@@ -250,6 +250,11 @@ def finish_node(state: AgentState) -> dict:
     if tools.is_eventbridge_mode():
         message = AIMessage(content="The process has been successfully completed.")
         logger.info(
+            "[Task %s][Step 4] finish_node skipping summary agent (eventbridge mode)",
+            state["task_id"],
+            extra={"task_id": state["task_id"], "workflow_mode": "eventbridge"},
+        )
+        logger.info(
             "[Task %s][Step 4] finish_node exiting with status=completed (eventbridge mode)",
             state["task_id"],
             extra={"task_id": state["task_id"], "status": "completed"},

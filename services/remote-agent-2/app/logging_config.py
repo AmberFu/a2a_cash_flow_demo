@@ -118,8 +118,11 @@ def configure_logging(
     level = (log_level or LOG_LEVEL).upper()
     root_logger.setLevel(level)
 
+    uvicorn_access = logging.getLogger("uvicorn.access")
+    uvicorn_access.handlers.clear()
+    uvicorn_access.propagate = True
     if suppress_metrics_access_logs:
-        logging.getLogger("uvicorn.access").addFilter(SuppressMetricsAccessFilter())
+        uvicorn_access.addFilter(SuppressMetricsAccessFilter())
 
 
 __all__ = ["CloudWatchJsonFormatter", "configure_logging"]
