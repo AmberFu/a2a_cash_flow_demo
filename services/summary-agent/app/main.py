@@ -6,7 +6,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
 
@@ -38,6 +38,12 @@ if METRICS_ENABLED:
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 else:
     logger.info("Prometheus instrumentation disabled via METRICS_ENABLED=false")
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics_disabled() -> PlainTextResponse:  # pragma: no cover - simple stub
+        """Return an empty 204 response so health probes do not trigger 404 errors."""
+
+        return PlainTextResponse("", status_code=204)
 
 
 @app.get("/")

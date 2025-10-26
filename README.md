@@ -198,6 +198,43 @@ sagemaker-user@default:~/a2a_cash_flow_demo$ git remote show origin
 
    若只看到 Root Agent 的 log，通常表示仍在 EventBridge 模式或 HTTP 呼叫失敗。切換模式並檢查 `REMOTE*_URL` 是否指向正確的 ClusterIP/port。
 
+## 使用 CloudWatch 觀察代理工作流
+
+以下步驟可以協助你在 AWS CloudWatch 中比對預期與實際的代理執行流程：
+
+1. **定位對應的 Log Group**：根據你的 EKS 叢集設定，應用程式日誌通常會被送到 `/<cluster-name>/application` 或自訂的 Log Group。確認 Root Agent 與各個 Remote Agent 的 Pod 日誌都有被匯入同一 Log Group。
+
+2. **CloudWatch Logs Insights 查詢範例**：在 Logs Insights 選擇對應的 Log Group 後，貼上以下查詢即可看到所有代理在單一任務的溝通順序：
+
+   ```sql
+   fields @timestamp, @message, kubernetes.pod_name, task_id, workflow_mode
+   | filter kubernetes.namespace_name = "a2a-demo"
+   | filter ispresent(task_id)
+   | sort @timestamp asc
+   ```
+
+   - `[Task …][Expected Flow]` 會列出 Root Agent 建議的步驟順序，可直接與後續 `Step X` log 逐一比對。這些記錄也會帶有 `task_id` 與 `workflow_mode` 方便篩選。 
+   - `Remote Agent A/B callback received`、`EventBridge dispatch` 等訊息則有助於確認 EventBridge + SQS 路徑的完整性。 
+
+3. **比對預期與實際步驟**：若你想要針對單一任務追蹤，先在 Logs Insights 搜尋對應的 `task_id`，再依時間排序即可看到 Root Agent 產生的 expected flow、實際步驟（`[Step X] …`）、以及遠端代理或 Summary Agent 的進出節點紀錄。
+
+4. **透過 AWS CLI 即時監看**：若想在終端機觀察，可以使用：
+
+   ```bash
+   aws logs tail <log-group-name> \
+     --follow \
+     --filter-pattern '{ ($.kubernetes.namespace_name = "a2a-demo") && ($.task_id = "<task-id>") }'
+   ```
+
+   將 `<log-group-name>` 與 `<task-id>` 改成實際值即可。若要同時觀察多個任務，可以移除 `task_id` 條件，僅保留 namespace 過濾。
+
+5. **快速檢查 EventBridge / JSON-RPC 狀態**：
+   - 看到 `workflow_mode=eventbridge` 並出現 `EventBridge dispatch` 與 `SQS callback` 訊息，代表事件流程正常。
+   - 若 log 顯示 `workflow_mode=direct-http` 且只有 HTTP 呼叫相關的步驟，表示系統處於本地直接呼叫模式。
+   - 如果只看到 `Step 1` 而沒有後續步驟或 callback 訊息，表示事件可能卡在外部服務（例如 EventBridge 規則、SQS Queue 或 Remote Agent）。
+
+6. **整合 Summary Agent 的健康檢查**：Summary Agent 在停用 Prometheus 後仍會對 `/metrics` 回應 204，因此健康檢查或 Load Balancer 探針不會再得到 404。你可以在 CloudWatch 中確認對應的 `GET /metrics` 日誌狀態碼是否為 204 以確保設定正確。
+
 5. **JSON-RPC 測試與追蹤**：啟用 `JSONRPC_ENABLED=true` 並 port-forward `service-jsonrpc.yaml`（`kubectl port-forward -n a2a-demo service/root-agent-jsonrpc 50000:50000`）後，可用 `services/jsonrpc_gateway/client.py` 送出 `a2a.submit_task` 取得同步結果。下列步驟可協助確認 Remote Agent 也有收到請求：
    - 送出請求：
 
