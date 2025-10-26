@@ -6,6 +6,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from typing import Any
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
@@ -63,7 +64,47 @@ class CloudWatchJsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def configure_logging(log_level: str | None = None) -> None:
+class TaskIdContextFilter(logging.Filter):
+    """確保所有日誌都帶有 `task_id` 欄位，方便在 CloudWatch 過濾。"""
+
+    def __init__(self, default_value: str = "n/a") -> None:
+        super().__init__()
+        self._default_value = default_value
+
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - trivial guard
+        if not hasattr(record, "task_id") or record.task_id in (None, ""):
+            record.task_id = self._default_value
+        return True
+
+
+class SuppressMetricsAccessFilter(logging.Filter):
+    """過濾掉健康檢查對 `/metrics` 的存取日誌。"""
+
+    _BLOCK_TOKENS = (
+        '"GET /metrics',
+        "GET /metrics HTTP",
+        "GET /metrics?",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - simple predicate
+        message: Any
+        try:
+            message = record.getMessage()
+        except Exception:  # pragma: no cover - defensive
+            message = record.msg
+
+        if isinstance(message, str):
+            return not any(token in message for token in self._BLOCK_TOKENS)
+
+        return True
+
+
+def configure_logging(
+    log_level: str | None = None,
+    *,
+    default_task_id: str = "n/a",
+    suppress_metrics_access_logs: bool = True,
+) -> None:
     """Configure root logging with the CloudWatch JSON formatter."""
 
     handler = logging.StreamHandler()
@@ -72,9 +113,13 @@ def configure_logging(log_level: str | None = None) -> None:
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
+    root_logger.addFilter(TaskIdContextFilter(default_value=default_task_id))
 
     level = (log_level or LOG_LEVEL).upper()
     root_logger.setLevel(level)
+
+    if suppress_metrics_access_logs:
+        logging.getLogger("uvicorn.access").addFilter(SuppressMetricsAccessFilter())
 
 
 __all__ = ["CloudWatchJsonFormatter", "configure_logging"]

@@ -25,8 +25,9 @@ logger = logging.getLogger(__name__)
 def _extra(task_id: str | None, **payload: object) -> dict[str, object]:
     """Construct logging extras with an optional task identifier."""
 
-    extra: dict[str, object] = {"task_id": task_id}
-    extra.update(payload)
+    extra: dict[str, object] = dict(payload)
+    if task_id:
+        extra["task_id"] = task_id
     return extra
 
 
@@ -111,4 +112,4 @@ def weather_report(
 
 
 if __name__ == "__main__":
-    uvicorn.run(app="main:app", host="0.0.0.0", port=PORT)
+    uvicorn.run(app="main:app", host="0.0.0.0", port=PORT, log_config=None)

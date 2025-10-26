@@ -500,4 +500,4 @@ async def jsonrpc_endpoint(raw_request: Request):
 
 if __name__ == "__main__":
     # 注意：reload 在容器內要搭配掛載原始碼才看得到變更
-    uvicorn.run(app="main:app", host=JSONRPC_BIND, port=JSONRPC_PORT)
+    uvicorn.run(app="main:app", host=JSONRPC_BIND, port=JSONRPC_PORT, log_config=None)
