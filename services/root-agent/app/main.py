@@ -1,10 +1,7 @@
 from contextlib import asynccontextmanager
-import json
 import logging
 import os
-import time
 import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Request
@@ -15,6 +12,7 @@ import uvicorn
 from a2a.graph import get_graph_app
 from a2a import tools as agent_tools
 from langchain_core.messages import HumanMessage, ToolMessage
+from logging_config import configure_logging
 from models import (
     CallbackRequest,
     CreateTaskRequest,
@@ -50,73 +48,6 @@ SUMMARY_MODEL_ID = os.environ.get(
     "SUMMARY_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
 )
 METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
-
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-
-
-class CloudWatchJsonFormatter(logging.Formatter):
-    """Emit JSON logs so CloudWatch can filter on structured fields like task_id."""
-
-    #: Attributes automatically added by the logging module that should not be
-    #: copied into the JSON payload.
-    _RESERVED_ATTRS = {
-        "args",
-        "asctime",
-        "created",
-        "exc_info",
-        "exc_text",
-        "filename",
-        "levelname",
-        "levelno",
-        "lineno",
-        "module",
-        "msecs",
-        "message",
-        "msg",
-        "name",
-        "pathname",
-        "process",
-        "processName",
-        "relativeCreated",
-        "stack_info",
-        "thread",
-        "threadName",
-    }
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.converter = time.gmtime
-
-    def format(self, record: logging.LogRecord) -> str:  # pragma: no cover - formatting logic
-        payload = {
-            "timestamp": datetime.utcfromtimestamp(record.created).isoformat(timespec="milliseconds") + "Z",
-            "level": record.levelname,
-            "logger": record.name,
-            "filename": record.filename,
-            "lineno": record.lineno,
-            "message": record.getMessage(),
-        }
-
-        if record.exc_info:
-            payload["exc_info"] = self.formatException(record.exc_info)
-
-        for attr, value in record.__dict__.items():
-            if attr in self._RESERVED_ATTRS or attr.startswith("_"):
-                continue
-            payload[attr] = value
-
-        return json.dumps(payload, ensure_ascii=False, default=str)
-
-
-def configure_logging() -> None:
-    handler = logging.StreamHandler()
-    handler.setFormatter(CloudWatchJsonFormatter())
-
-    root_logger = logging.getLogger()
-    root_logger.handlers.clear()
-    root_logger.addHandler(handler)
-    root_logger.setLevel(LOG_LEVEL)
-
 
 configure_logging()
 logging.getLogger("langgraph").setLevel(logging.DEBUG)
