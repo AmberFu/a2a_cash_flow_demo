@@ -135,15 +135,59 @@ def get_task_state_snapshot(task_id: str) -> Tuple[str, Dict[str, Any]]:
     return status, values
 
 
+def build_expected_step_sequence(workflow_mode: str) -> List[Dict[str, str]]:
+    if workflow_mode == "eventbridge":
+        return [
+            {"order": 1, "description": "Root Agent receives task creation request"},
+            {"order": 2, "description": "Root Agent start_node dispatches task to Remote Agent A via EventBridge"},
+            {"order": 3, "description": "Remote Agent A processes the EventBridge payload and sends result through SQS callback"},
+            {"order": 4, "description": "Root Agent resumes graph and draft_response_node dispatches to Remote Agent B via EventBridge"},
+            {"order": 5, "description": "Remote Agent B processes the EventBridge payload and sends result through SQS callback"},
+            {"order": 6, "description": "Root Agent finishes workflow and marks task as completed"},
+        ]
+
+    return [
+        {"order": 1, "description": "Root Agent receives task creation request"},
+        {"order": 2, "description": "Root Agent start_node calls Weather Remote Agent via HTTP"},
+        {"order": 3, "description": "Root Agent draft_response_node calls Transport Remote Agent via HTTP"},
+        {"order": 4, "description": "Root Agent finish_node calls Summary Agent via HTTP and returns result"},
+    ]
+
+
+def log_expected_steps(task_id: str, workflow_mode: str) -> None:
+    expected_steps = build_expected_step_sequence(workflow_mode)
+    serialized_steps = " -> ".join(
+        f"{step['order']}. {step['description']}" for step in expected_steps
+    )
+    logger.info(
+        "[Task %s][Expected Flow] %s",
+        task_id,
+        serialized_steps,
+        extra={
+            "task_id": task_id,
+            "workflow_mode": workflow_mode,
+            "expected_steps": expected_steps,
+        },
+    )
+
+
 async def start_graph_run(
     loan_case_id: str, user_requirement: Optional[UserRequirement]
 ) -> CreateTaskResponse:
     task_id = str(uuid.uuid4())
+    workflow_mode = "eventbridge" if agent_tools.is_eventbridge_mode() else "direct-http"
     logger.info(
-        "Received request to create task for loan case: %s. Assigned Task ID: %s",
-        loan_case_id,
+        "[Task %s][Step 1] Received task creation request for loan case %s (mode=%s)",
         task_id,
+        loan_case_id,
+        workflow_mode,
+        extra={
+            "task_id": task_id,
+            "loan_case_id": loan_case_id,
+            "workflow_mode": workflow_mode,
+        },
     )
+    log_expected_steps(task_id, workflow_mode)
     config = {"configurable": {"thread_id": task_id}}
 
     requirement_payload: Dict[str, Any] = {}
@@ -172,9 +216,18 @@ async def start_graph_run(
     }
     result_state: Optional[Any] = None
     try:
-        logger.info(">>> Start graph_app.invoke via start_graph_run...")
+        logger.info(
+            "[Task %s][Graph Invoke][Enter] Starting graph_app.invoke (mode=%s)",
+            task_id,
+            workflow_mode,
+            extra={"task_id": task_id, "workflow_mode": workflow_mode},
+        )
         result_state = graph_app.invoke(initial_state, config=config)
-        logger.info(">>> Graph finished")
+        logger.info(
+            "[Task %s][Graph Invoke][Exit] graph_app.invoke returned",
+            task_id,
+            extra={"task_id": task_id, "workflow_mode": workflow_mode},
+        )
     except Exception as exc:  # pragma: no cover - runtime safety
         logger.error("Failed to start graph for task %s. Error: %s", task_id, exc)
         if "events" in str(exc) or "PutEvents" in str(exc):
@@ -269,7 +322,18 @@ async def create_task(request: CreateTaskRequest):
 async def handle_callback(request: CallbackRequest):
     """Endpoint to receive results from remote agents via SQS."""
     task_id = request.task_id
-    logger.info("Received callback for task %s from %s with status '%s'", task_id, request.source, request.status)
+    logger.info(
+        "[Task %s][EventBridge Callback][Enter] Received callback from %s with status '%s'",
+        task_id,
+        request.source,
+        request.status,
+        extra={
+            "task_id": task_id,
+            "source": request.source,
+            "status": request.status,
+            "needs_info": request.needs_info,
+        },
+    )
 
     config = {"configurable": {"thread_id": task_id}}
 
@@ -283,11 +347,25 @@ async def handle_callback(request: CallbackRequest):
             state_update["needs_info"] = request.needs_info
             state_update["status"] = "awaiting_human_input"
 
+        logger.info(
+            "[Task %s][EventBridge Callback] Applying state update: %s",
+            task_id,
+            state_update,
+            extra={"task_id": task_id, "state_update": state_update},
+        )
+
         graph_app.update_state(config, state_update)
 
         tool_message = ToolMessage(
             content=f"Received result from {request.source}: {request.result}",
             name=request.source,
+        )
+
+        logger.info(
+            "[Task %s][EventBridge Callback] Resuming graph with ToolMessage from %s",
+            task_id,
+            request.source,
+            extra={"task_id": task_id, "source": request.source},
         )
 
         graph_app.invoke({"messages": [tool_message]}, config)
@@ -298,13 +376,26 @@ async def handle_callback(request: CallbackRequest):
         logger.error("Error processing callback for task %s. Error: %s", task_id, exc)
         raise HTTPException(status_code=500, detail=f"Failed to process callback: {exc}") from exc
 
+    logger.info(
+        "[Task %s][EventBridge Callback][Exit] Completed callback processing for %s",
+        task_id,
+        request.source,
+        extra={"task_id": task_id, "source": request.source},
+    )
+
     return {"message": f"Callback for task {task_id} processed."}
 
 
 @app.post("/tasks/{task_id}/answers", status_code=200)
 async def submit_hitl_answer(task_id: str, request: HITLAnswerRequest):
     """Endpoint for a human to submit required information, resuming the graph."""
-    logger.info("Received HITL answer for task %s.", task_id)
+    truncated_answer = (request.answer[:50] + "...") if len(request.answer) > 50 else request.answer
+    logger.info(
+        "[Task %s][HITL][Enter] Received human answer snippet='%s'",
+        task_id,
+        truncated_answer,
+        extra={"task_id": task_id, "answer_preview": truncated_answer},
+    )
     config = {"configurable": {"thread_id": task_id}}
 
     try:
@@ -324,6 +415,11 @@ async def submit_hitl_answer(task_id: str, request: HITLAnswerRequest):
         )
 
         human_message = HumanMessage(content=f"Human provided answer: {request.answer}")
+        logger.info(
+            "[Task %s][HITL] Resuming graph after human input",
+            task_id,
+            extra={"task_id": task_id},
+        )
         graph_app.invoke({"messages": [human_message]}, config)
 
     except HTTPException:
@@ -331,6 +427,12 @@ async def submit_hitl_answer(task_id: str, request: HITLAnswerRequest):
     except Exception as exc:  # pragma: no cover - runtime safety
         logger.error("Error processing HITL answer for task %s. Error: %s", task_id, exc)
         raise HTTPException(status_code=500, detail=f"Failed to process HITL answer: {exc}") from exc
+
+    logger.info(
+        "[Task %s][HITL][Exit] Completed processing human answer",
+        task_id,
+        extra={"task_id": task_id},
+    )
 
     return {"message": f"HITL answer for task {task_id} submitted and workflow resumed."}
 

@@ -26,10 +26,12 @@ HTTP_TIMEOUT = float(os.getenv("A2A_HTTP_TIMEOUT", "10"))
 DEFAULT_TRANSPORT_RESULTS = int(os.getenv("A2A_TRANSPORT_RESULTS", "3"))
 
 # Initialize boto3 client
+logger = logging.getLogger(__name__)
+
 try:
     eventbridge_client = boto3.client("events", region_name=AWS_REGION)
 except Exception as e:
-    logging.error(f"Failed to initialize boto3 client: {e}")
+    logger.error("Failed to initialize boto3 client: %s", e)
     eventbridge_client = None
 
 # --- Tool Definitions ---
@@ -44,10 +46,11 @@ def dispatch_to_remote_agent(
     Sends a task to a remote agent via AWS EventBridge.
     """
     if not is_eventbridge_mode():
-        logging.info(
-            "Skipping EventBridge dispatch for task %s because workflow mode is '%s'",
+        logger.info(
+            "[Task %s][EventBridge][Skip] Workflow mode '%s' uses direct HTTP calls",
             task_id,
             WORKFLOW_MODE,
+            extra={"task_id": task_id, "workflow_mode": WORKFLOW_MODE},
         )
         return {
             "status": "skipped",
@@ -56,7 +59,7 @@ def dispatch_to_remote_agent(
 
     if not eventbridge_client:
         error_msg = "EventBridge client is not initialized."
-        logging.error(error_msg)
+        logger.error("[Task %s][EventBridge][Error] %s", task_id, error_msg)
         return {"status": "error", "message": error_msg}
 
     event_detail = {
@@ -65,7 +68,18 @@ def dispatch_to_remote_agent(
     }
 
     try:
-        logging.info(f"Dispatching task {task_id} for case {loan_case_id} to {agent_name}...")
+        logger.info(
+            "[Task %s][EventBridge][Enter] Dispatching to %s (detail_type=%s)",
+            task_id,
+            agent_name,
+            detail_type,
+            extra={
+                "task_id": task_id,
+                "loan_case_id": loan_case_id,
+                "agent_name": agent_name,
+                "detail_type": detail_type,
+            },
+        )
         response = eventbridge_client.put_events(
             Entries=[
                 {
@@ -80,11 +94,27 @@ def dispatch_to_remote_agent(
         
         failed_count = response.get("FailedEntryCount", 0)
         if failed_count > 0:
-            error_message = f"Failed to send event to EventBridge for task {task_id}. Response: {response}"
-            logging.error(error_message)
+            error_message = (
+                f"Failed to send event to EventBridge for task {task_id}. Response: {response}"
+            )
+            logger.error(
+                "[Task %s][EventBridge][Exit] Dispatch failed: %s",
+                task_id,
+                error_message,
+                extra={"task_id": task_id, "response": response},
+            )
             return {"status": "error", "message": error_message}
 
-        logging.info(f"Successfully dispatched task {task_id} to {agent_name}. EventID: {response['Entries'][0]['EventId']}")
+        logger.info(
+            "[Task %s][EventBridge][Exit] Dispatch succeeded (EventID=%s)",
+            task_id,
+            response["Entries"][0]["EventId"],
+            extra={
+                "task_id": task_id,
+                "agent_name": agent_name,
+                "event_id": response["Entries"][0]["EventId"],
+            },
+        )
         return {
             "status": "success",
             "message": f"Task {task_id} dispatched to {agent_name}.",
@@ -92,7 +122,12 @@ def dispatch_to_remote_agent(
         }
     except Exception as e:
         error_message = f"An exception occurred while dispatching task {task_id}: {e}"
-        logging.error(error_message)
+        logger.error(
+            "[Task %s][EventBridge][Exit] Exception during dispatch: %s",
+            task_id,
+            e,
+            extra={"task_id": task_id},
+        )
         return {"status": "error", "message": error_message}
 
 
@@ -142,28 +177,42 @@ def _default_travel_date(requirement: Dict[str, Any]) -> str:
     return datetime.utcnow().date().isoformat()
 
 
-def fetch_weather_report(requirement: Dict[str, Any]) -> Dict[str, Any]:
+def fetch_weather_report(task_id: str, requirement: Dict[str, Any]) -> Dict[str, Any]:
     payload = {
         "city": requirement.get("destination") or requirement.get("origin") or "台北",
         "date": _default_travel_date(requirement),
         "time_range": _compute_time_range(requirement),
     }
     endpoint = f"{REMOTE1_URL.rstrip('/')}/weather/report"
-    logging.info("Calling Weather Remote Agent via POST: %s", endpoint)
+    logger.info(
+        "[Task %s][DirectHTTP][Enter] Calling Weather Remote Agent", 
+        task_id,
+        extra={"task_id": task_id, "endpoint": endpoint, "payload": payload},
+    )
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT) as client:
             response = client.post(endpoint, json=payload)
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPError as exc:
-        logging.error("Weather agent call failed: %s", exc)
+        logger.error(
+            "[Task %s][DirectHTTP][Error] Weather agent call failed: %s",
+            task_id,
+            exc,
+            extra={"task_id": task_id},
+        )
         raise RuntimeError(f"Weather agent request failed: {exc}") from exc
 
-    logging.debug("Weather agent response: %s", data)
+    logger.info(
+        "[Task %s][DirectHTTP][Exit] Weather agent call succeeded",
+        task_id,
+        extra={"task_id": task_id, "endpoint": endpoint},
+    )
+    logger.debug("Weather agent response: %s", data)
     return data
 
 
-def fetch_transport_plans(requirement: Dict[str, Any]) -> Dict[str, Any]:
+def fetch_transport_plans(task_id: str, requirement: Dict[str, Any]) -> Dict[str, Any]:
     payload = {
         "destination": requirement.get("destination") or "台北",
         "arrival_time": _normalize_arrival_time(requirement.get("desired_arrival_time")),
@@ -171,17 +220,31 @@ def fetch_transport_plans(requirement: Dict[str, Any]) -> Dict[str, Any]:
         "results": requirement.get("transport_results", DEFAULT_TRANSPORT_RESULTS),
     }
     endpoint = f"{REMOTE2_URL.rstrip('/')}/transport/plans"
-    logging.info("Calling Transport Remote Agent via POST: %s", endpoint)
+    logger.info(
+        "[Task %s][DirectHTTP][Enter] Calling Transport Remote Agent",
+        task_id,
+        extra={"task_id": task_id, "endpoint": endpoint, "payload": payload},
+    )
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT) as client:
             response = client.post(endpoint, json=payload)
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPError as exc:
-        logging.error("Transport agent call failed: %s", exc)
+        logger.error(
+            "[Task %s][DirectHTTP][Error] Transport agent call failed: %s",
+            task_id,
+            exc,
+            extra={"task_id": task_id},
+        )
         raise RuntimeError(f"Transport agent request failed: {exc}") from exc
 
-    logging.debug("Transport agent response: %s", data)
+    logger.info(
+        "[Task %s][DirectHTTP][Exit] Transport agent call succeeded",
+        task_id,
+        extra={"task_id": task_id, "endpoint": endpoint},
+    )
+    logger.debug("Transport agent response: %s", data)
     return data
 
 
@@ -208,15 +271,29 @@ def request_summary(
         "transport": transport_payload,
     }
     endpoint = f"{SUMMARY_URL.rstrip('/')}/summaries"
-    logging.info("Calling Summary Agent via POST: %s", endpoint)
+    logger.info(
+        "[Task %s][DirectHTTP][Enter] Calling Summary Agent",
+        task_id,
+        extra={"task_id": task_id, "endpoint": endpoint},
+    )
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT) as client:
             response = client.post(endpoint, json=payload)
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPError as exc:
-        logging.error("Summary agent call failed: %s", exc)
+        logger.error(
+            "[Task %s][DirectHTTP][Error] Summary agent call failed: %s",
+            task_id,
+            exc,
+            extra={"task_id": task_id},
+        )
         raise RuntimeError(f"Summary agent request failed: {exc}") from exc
 
-    logging.debug("Summary agent response: %s", data)
+    logger.info(
+        "[Task %s][DirectHTTP][Exit] Summary agent call succeeded",
+        task_id,
+        extra={"task_id": task_id, "endpoint": endpoint},
+    )
+    logger.debug("Summary agent response: %s", data)
     return data
