@@ -24,6 +24,7 @@ WORKFLOW_MODE = os.getenv("A2A_WORKFLOW_MODE", "eventbridge").lower()
 USE_DDB_CHECKPOINTER = os.getenv("A2A_USE_DDB_CHECKPOINTER", "true").lower() == "true"
 HTTP_TIMEOUT = float(os.getenv("A2A_HTTP_TIMEOUT", "10"))
 DEFAULT_TRANSPORT_RESULTS = int(os.getenv("A2A_TRANSPORT_RESULTS", "3"))
+TASK_ID_HEADER = "X-A2A-Task-Id"
 
 # Initialize boto3 client
 logger = logging.getLogger(__name__)
@@ -195,8 +196,9 @@ def fetch_weather_report(task_id: str, requirement: Dict[str, Any]) -> Dict[str,
         extra={"task_id": task_id, "endpoint": endpoint, "payload": payload},
     )
     try:
+        headers = {TASK_ID_HEADER: task_id}
         with httpx.Client(timeout=HTTP_TIMEOUT) as client:
-            response = client.post(endpoint, json=payload)
+            response = client.post(endpoint, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPError as exc:
@@ -231,8 +233,9 @@ def fetch_transport_plans(task_id: str, requirement: Dict[str, Any]) -> Dict[str
         extra={"task_id": task_id, "endpoint": endpoint, "payload": payload},
     )
     try:
+        headers = {TASK_ID_HEADER: task_id}
         with httpx.Client(timeout=HTTP_TIMEOUT) as client:
-            response = client.post(endpoint, json=payload)
+            response = client.post(endpoint, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPError as exc:

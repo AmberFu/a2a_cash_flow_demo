@@ -1,23 +1,18 @@
 """Transport plan Remote Agent service entrypoint."""
-
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import logging
 import os
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Header
+from fastapi.responses import JSONResponse, Response
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
 
+from logging_config import configure_logging
 from models import TransportPlanRequest, TransportPlanResponse
 from transport_service import generate_transport_plans
-
-
-LOG_FORMAT = "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
-logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
-logger = logging.getLogger(__name__)
 
 
 PORT = int(os.environ.get("PORT", 50002))
@@ -26,6 +21,17 @@ LLM_MODEL_ID = os.environ.get(
     "LLM_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
 )
 METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
+
+configure_logging()
+logger = logging.getLogger(__name__)
+
+
+def _extra(task_id: str | None, **payload: object) -> dict[str, object]:
+    """Construct logging extras with an optional task identifier."""
+
+    extra: dict[str, object] = {"task_id": task_id}
+    extra.update(payload)
+    return extra
 
 
 @asynccontextmanager
@@ -47,6 +53,12 @@ if METRICS_ENABLED:
 else:
     logger.info("Prometheus instrumentation disabled via METRICS_ENABLED=false")
 
+    @app.get("/metrics", include_in_schema=False)
+    def metrics_disabled() -> Response:
+        """Return an empty response so health checks do not log 404s."""
+
+        return Response(status_code=204)
+
 
 @app.get("/")
 def status() -> JSONResponse:
@@ -67,16 +79,27 @@ def status() -> JSONResponse:
 @app.post("/transport/plans", response_model=TransportPlanResponse)
 def generate_transport_plan_endpoint(
     request: TransportPlanRequest,
+    task_id: str | None = Header(default=None, alias="X-A2A-Task-Id"),
 ) -> TransportPlanResponse:
     """依據使用者輸入生成交通資訊方案。"""
 
+    task_label = task_id or "n/a"
+    log_extra = _extra(
+        task_id,
+        destination=request.destination,
+        arrival_time=request.arrival_time,
+        requested_results=request.results,
+    )
     logger.info(
-        "Generating %s transport plans for destination %s by %s",
+        "[Task %s] Generating %s transport plans for destination %s by %s",
+        task_label,
         request.results,
         request.destination,
         request.arrival_time,
+        extra=log_extra,
     )
     plans = generate_transport_plans(request)
+    logger.debug("Transport plans generated", extra={**log_extra, "plan_count": len(plans)})
     return TransportPlanResponse(
         destination=request.destination,
         requested_arrival_time=request.arrival_time,
