@@ -72,6 +72,89 @@ Weather Agent (/weather/report)   Transport Agent (/transport/plans)
              Root Agent 整合回傳
 ```
 
+### (後續刪除) 同步本地分支
+
+我的開發 master branch - dev_root_agent, 在跟 codex 協作時, 當我在 github page merge PR 並刪除分支, 需用下面指令同步回來
+
+```
+# 原本狀態 - git branch -vv
+sagemaker-user@default:~/a2a_cash_flow_demo$ git branch -vv
+  codex/-root-agent-remote-agents                       dc99dec [origin/codex/-root-agent-remote-agents] Align JSON-RPC service port and clarify POST calls
+  codex/add-transport-info-generation-to-remote-agent-2 a9ba0f0 [origin/codex/add-transport-info-generation-to-remote-agent-2: gone] Document agent coordination and update RA2 guide
+  codex/develop-remote-agent-weather-with-tests         fd20108 [origin/codex/develop-remote-agent-weather-with-tests: gone] Fix date field alias for weather agent models
+  codex/implement-summary-agent-with-user-suggestions   a20b778 [origin/codex/implement-summary-agent-with-user-suggestions: gone] refactor: align summary main with remote agent style
+  codex/update-terraform-and-kubernetes-files           98d9257 [origin/codex/update-terraform-and-kubernetes-files: gone] Update CI/CD script for all agents
+* dev_root_agent                                        5004ffb Merge pull request #5 from AmberFu/codex/implement-summary-agent-with-user-suggestions
+  dev_simple_a2a_core                                   ada0e94 Update new a2a demo setup and task
+  main                                                  15dcb95 [origin/main] Merge pull request #1 from AmberFu/dev_root_agent
+
+# 查看特定遠端版本資料庫 repository 的詳細資訊 - git remote show origin
+sagemaker-user@default:~/a2a_cash_flow_demo$ git remote show origin
+* remote origin
+  Fetch URL: https://github.com/AmberFu/a2a_cash_flow_demo.git
+  Push  URL: https://github.com/AmberFu/a2a_cash_flow_demo.git
+  HEAD branch: main
+  Remote branches:
+    dev_root_agent                                      tracked
+    dev_simple_a2a_core                                 tracked
+    main                                                tracked
+    refs/remotes/origin/codex/-root-agent-remote-agents stale (use 'git remote prune' to remove)
+  Local branches configured for 'git pull':
+    codex/-root-agent-remote-agents                       merges with remote codex/-root-agent-remote-agents
+    codex/add-transport-info-generation-to-remote-agent-2 merges with remote codex/add-transport-info-generation-to-remote-agent-2
+    codex/develop-remote-agent-weather-with-tests         merges with remote codex/develop-remote-agent-weather-with-tests
+    codex/implement-summary-agent-with-user-suggestions   merges with remote codex/implement-summary-agent-with-user-suggestions
+    codex/update-terraform-and-kubernetes-files           merges with remote codex/update-terraform-and-kubernetes-files
+    main                                                  merges with remote main
+  Local refs configured for 'git push':
+    dev_root_agent      pushes to dev_root_agent      (local out of date)
+    dev_simple_a2a_core pushes to dev_simple_a2a_core (up to date)
+    main                pushes to main                (up to date)
+
+# 修剪的分支清單 - git remote prune origin
+sagemaker-user@default:~/a2a_cash_flow_demo$ git remote prune origin
+Pruning origin
+URL: https://github.com/AmberFu/a2a_cash_flow_demo.git
+ * [pruned] origin/codex/-root-agent-remote-agents
+
+
+# 同步分支 - git pull origin dev_root_agent
+sagemaker-user@default:~/a2a_cash_flow_demo$ git pull origin dev_root_agent
+From https://github.com/AmberFu/a2a_cash_flow_demo
+ * branch            dev_root_agent -> FETCH_HEAD
+Updating 5004ffb..75dc477
+Fast-forward
+ README.md                            | 130 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ kubernetes/deployment-remote1.yaml   |   2 ++
+...
+services/summary-agent/app/main.py   |   7 +++++-
+ 14 files changed, 606 insertions(+), 118 deletions(-)
+
+
+# 再度確認
+sagemaker-user@default:~/a2a_cash_flow_demo$ git remote show origin
+* remote origin
+  Fetch URL: https://github.com/AmberFu/a2a_cash_flow_demo.git
+  Push  URL: https://github.com/AmberFu/a2a_cash_flow_demo.git
+  HEAD branch: main
+  Remote branches:
+    dev_root_agent      tracked
+    dev_simple_a2a_core tracked
+    main                tracked
+  Local branches configured for 'git pull':
+    codex/-root-agent-remote-agents                       merges with remote codex/-root-agent-remote-agents
+    codex/add-transport-info-generation-to-remote-agent-2 merges with remote codex/add-transport-info-generation-to-remote-agent-2
+    codex/develop-remote-agent-weather-with-tests         merges with remote codex/develop-remote-agent-weather-with-tests
+    codex/implement-summary-agent-with-user-suggestions   merges with remote codex/implement-summary-agent-with-user-suggestions
+    codex/update-terraform-and-kubernetes-files           merges with remote codex/update-terraform-and-kubernetes-files
+    main                                                  merges with remote main
+  Local refs configured for 'git push':
+    dev_root_agent      pushes to dev_root_agent      (up to date)
+    dev_simple_a2a_core pushes to dev_simple_a2a_core (up to date)
+    main                pushes to main                (up to date)
+
+```
+
 ### 如何在本地端跑完整流程並觀察 Remote Agents
 
 1. **啟動或 Port-Forward 服務**：
@@ -293,12 +376,6 @@ data:
 - 建立 namespace - 目前是士齊協助完成
 
 
-- 
-
-
-
-
-
 ### 使用 Terraform 定義和佈署 DynamoDB
 
 - 安裝 terraform @AWS SegeMaker Studio
@@ -487,9 +564,6 @@ ps. 通常後續需要設定 AWS 認證，但因為在 SegeMaker Studio，所以
     a2a_audit_table_arn = "arn:aws:dynamodb:ap-southeast-1:182399696164:table/ds_demo_a2a_audit"
     a2a_tasks_table_arn = "arn:aws:dynamodb:ap-southeast-1:182399696164:table/ds_demo_a2a_tasks"
     ```
-
-- 
-
 
 
 ### Test A2A with Human-In-The-Loop (HITL)
