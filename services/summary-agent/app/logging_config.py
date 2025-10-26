@@ -109,10 +109,14 @@ def configure_logging(
     handler = logging.StreamHandler()
     handler.setFormatter(CloudWatchJsonFormatter())
 
+    task_id_filter = TaskIdContextFilter(default_value=default_task_id)
+    handler.addFilter(task_id_filter)
+
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
+    root_logger.filters.clear()
     root_logger.addHandler(handler)
-    root_logger.addFilter(TaskIdContextFilter(default_value=default_task_id))
+    root_logger.addFilter(task_id_filter)
 
     level = (log_level or LOG_LEVEL).upper()
     root_logger.setLevel(level)
@@ -122,6 +126,12 @@ def configure_logging(
     uvicorn_access.propagate = True
     if suppress_metrics_access_logs:
         uvicorn_access.addFilter(SuppressMetricsAccessFilter())
+
+    uvicorn_error = logging.getLogger("uvicorn.error")
+    uvicorn_error.handlers.clear()
+    uvicorn_error.filters.clear()
+    uvicorn_error.propagate = True
+    uvicorn_error.addFilter(task_id_filter)
 
 
 __all__ = ["CloudWatchJsonFormatter", "configure_logging"]
