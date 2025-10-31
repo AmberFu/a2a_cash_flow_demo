@@ -6,10 +6,11 @@ from contextlib import asynccontextmanager
 import logging
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
+from jsonrpcserver import dispatch
 
 from models import TransportPlanRequest, TransportPlanResponse
 from transport_service import generate_transport_plans
@@ -48,6 +49,25 @@ else:
     logger.info("Prometheus instrumentation disabled via METRICS_ENABLED=false")
 
 
+def generate_transport_plan_impl(
+    request: TransportPlanRequest,
+) -> TransportPlanResponse:
+    """Core logic for generating transport plans."""
+    logger.info(
+        "Generating %s transport plans for destination %s by %s",
+        request.results,
+        request.destination,
+        request.arrival_time,
+    )
+    plans = generate_transport_plans(request)
+    return TransportPlanResponse(
+        destination=request.destination,
+        requested_arrival_time=request.arrival_time,
+        date=request.date,
+        plans=plans,
+    )
+
+
 @app.get("/")
 def status() -> JSONResponse:
     """回傳服務狀態。"""
@@ -68,21 +88,34 @@ def status() -> JSONResponse:
 def generate_transport_plan_endpoint(
     request: TransportPlanRequest,
 ) -> TransportPlanResponse:
-    """依據使用者輸入生成交通資訊方案。"""
+    """RESTful endpoint for transport plans."""
+    return generate_transport_plan_impl(request)
 
-    logger.info(
-        "Generating %s transport plans for destination %s by %s",
-        request.results,
-        request.destination,
-        request.arrival_time,
+
+async def transport_plans_rpc(
+    destination: str, arrival_time: str, date: str, results: int
+) -> dict:
+    """JSON-RPC method for transport plans."""
+    request = TransportPlanRequest(
+        destination=destination,
+        arrival_time=arrival_time,
+        date=date,
+        results=results,
     )
-    plans = generate_transport_plans(request)
-    return TransportPlanResponse(
-        destination=request.destination,
-        requested_arrival_time=request.arrival_time,
-        date=request.date,
-        plans=plans,
+    response = generate_transport_plan_impl(request)
+    return response.model_dump()
+
+
+@app.post("/jsonrpc")
+async def jsonrpc_endpoint(request: Request):
+    """JSON-RPC endpoint."""
+    req_str = await request.body()
+    response = await dispatch(
+        req_str.decode(), methods={"transport.plans": transport_plans_rpc}
     )
+    if response.wanted:
+        return JSONResponse(content=response.deserialized(), status_code=response.http_status)
+    return JSONResponse(content=None, status_code=204)
 
 
 if __name__ == "__main__":

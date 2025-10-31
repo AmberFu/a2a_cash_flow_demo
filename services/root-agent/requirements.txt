@@ -25,3 +25,4 @@ redis[hiredis]
 
 # HTTP client for local direct mode
 httpx
+jsonrpcclient

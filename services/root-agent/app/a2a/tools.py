@@ -7,7 +7,8 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-import httpx
+from jsonrpcclient import request as jsonrpc_request
+from jsonrpcclient.exceptions import JsonRpcClientError
 
 # --- Configuration ---
 # It's recommended to manage these via environment variables
@@ -143,19 +144,17 @@ def _default_travel_date(requirement: Dict[str, Any]) -> str:
 
 
 def fetch_weather_report(requirement: Dict[str, Any]) -> Dict[str, Any]:
-    payload = {
+    params = {
         "city": requirement.get("destination") or requirement.get("origin") or "台北",
         "date": _default_travel_date(requirement),
         "time_range": _compute_time_range(requirement),
     }
-    endpoint = f"{REMOTE1_URL.rstrip('/')}/weather/report"
-    logging.info("Calling Weather Remote Agent via POST: %s", endpoint)
+    endpoint = f"{REMOTE1_URL.rstrip('/')}/jsonrpc"
+    logging.info("Calling Weather Remote Agent via JSON-RPC: %s", endpoint)
     try:
-        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
-            response = client.post(endpoint, json=payload)
-            response.raise_for_status()
-            data = response.json()
-    except httpx.HTTPError as exc:
+        response = jsonrpc_request(endpoint, "weather.report", **params)
+        data = response.data.result
+    except JsonRpcClientError as exc:
         logging.error("Weather agent call failed: %s", exc)
         raise RuntimeError(f"Weather agent request failed: {exc}") from exc
 
@@ -164,20 +163,18 @@ def fetch_weather_report(requirement: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def fetch_transport_plans(requirement: Dict[str, Any]) -> Dict[str, Any]:
-    payload = {
+    params = {
         "destination": requirement.get("destination") or "台北",
         "arrival_time": _normalize_arrival_time(requirement.get("desired_arrival_time")),
         "date": _default_travel_date(requirement),
         "results": requirement.get("transport_results", DEFAULT_TRANSPORT_RESULTS),
     }
-    endpoint = f"{REMOTE2_URL.rstrip('/')}/transport/plans"
-    logging.info("Calling Transport Remote Agent via POST: %s", endpoint)
+    endpoint = f"{REMOTE2_URL.rstrip('/')}/jsonrpc"
+    logging.info("Calling Transport Remote Agent via JSON-RPC: %s", endpoint)
     try:
-        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
-            response = client.post(endpoint, json=payload)
-            response.raise_for_status()
-            data = response.json()
-    except httpx.HTTPError as exc:
+        response = jsonrpc_request(endpoint, "transport.plans", **params)
+        data = response.data.result
+    except JsonRpcClientError as exc:
         logging.error("Transport agent call failed: %s", exc)
         raise RuntimeError(f"Transport agent request failed: {exc}") from exc
 
@@ -191,7 +188,7 @@ def request_summary(
     weather_report: Dict[str, Any],
     transport_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    payload = {
+    params = {
         "task_id": task_id,
         "user_requirement": {
             "origin": requirement.get("origin") or "台北",
@@ -207,14 +204,12 @@ def request_summary(
         "weather_report": weather_report,
         "transport": transport_payload,
     }
-    endpoint = f"{SUMMARY_URL.rstrip('/')}/summaries"
-    logging.info("Calling Summary Agent via POST: %s", endpoint)
+    endpoint = f"{SUMMARY_URL.rstrip('/')}/jsonrpc"
+    logging.info("Calling Summary Agent via JSON-RPC: %s", endpoint)
     try:
-        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
-            response = client.post(endpoint, json=payload)
-            response.raise_for_status()
-            data = response.json()
-    except httpx.HTTPError as exc:
+        response = jsonrpc_request(endpoint, "summaries.create", **params)
+        data = response.data.result
+    except JsonRpcClientError as exc:
         logging.error("Summary agent call failed: %s", exc)
         raise RuntimeError(f"Summary agent request failed: {exc}") from exc
 
