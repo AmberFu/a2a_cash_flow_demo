@@ -91,6 +91,12 @@ spec:
           - name: REDIS_PORT
             value: "6379"
 
+          # --- Workflow Mode ---
+          # "eventbridge" (default): Uses AWS EventBridge for async orchestration.
+          # "local": Uses direct JSON-RPC calls for synchronous testing.
+          - name: A2A_WORKFLOW_MODE
+            value: "local"
+
           # --- JSON-RPC over HTTPS 測試開關 ---
           - name: JSONRPC_ENABLED
             value: "true"
