@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 from jsonrpcclient import request as jsonrpc_request
-from jsonrpcclient.exceptions import JsonRpcClientError
 
 # --- Configuration ---
 # It's recommended to manage these via environment variables
@@ -154,7 +153,7 @@ def fetch_weather_report(requirement: Dict[str, Any]) -> Dict[str, Any]:
     try:
         response = jsonrpc_request(endpoint, "weather.report", **params)
         data = response.data.result
-    except JsonRpcClientError as exc:
+    except Exception as exc:
         logging.error("Weather agent call failed: %s", exc)
         raise RuntimeError(f"Weather agent request failed: {exc}") from exc
 
@@ -174,7 +173,7 @@ def fetch_transport_plans(requirement: Dict[str, Any]) -> Dict[str, Any]:
     try:
         response = jsonrpc_request(endpoint, "transport.plans", **params)
         data = response.data.result
-    except JsonRpcClientError as exc:
+    except Exception as exc:
         logging.error("Transport agent call failed: %s", exc)
         raise RuntimeError(f"Transport agent request failed: {exc}") from exc
 
@@ -209,7 +208,7 @@ def request_summary(
     try:
         response = jsonrpc_request(endpoint, "summaries.create", **params)
         data = response.data.result
-    except JsonRpcClientError as exc:
+    except Exception as exc:
         logging.error("Summary agent call failed: %s", exc)
         raise RuntimeError(f"Summary agent request failed: {exc}") from exc
 
