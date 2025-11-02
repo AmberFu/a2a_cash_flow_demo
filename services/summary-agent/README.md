@@ -1,94 +1,158 @@
 # Summary Agent Service
 
-Summary Agent 整合了 Weather Remote Agent 與 Transport Remote Agent 的結果，根據使用者提供的出發地、目的地、旅遊日期與偏好，產出具體的乘車建議與天氣提醒。
+## 1. Service Purpose
 
-## 專案結構
+The **Summary Agent** is the final agent in the travel planning workflow. Its primary function is to synthesize information from the other remote agents into a coherent and helpful travel plan for the end-user.
 
-- `app/config.py`：讀取環境變數並建立設定物件。
-- `app/models.py`：定義與 Remote Agent 對應的 Pydantic 模型（包含 `date` 與 `time` 欄位）。
-- `app/summarizer.py`：整理交通資訊並挑選三個最佳班次，依據天氣數據產生提醒。
-- `app/main.py`：FastAPI 入口，提供健康檢查與 `/summaries` API。
-- `requirements.txt`：服務所需的依賴。
+-   **Function**: It receives the user's original travel requirement, the weather report from `remote-agent-1`, and the transportation plans from `remote-agent-2`.
+-   **Processing**: It uses a Large Language Model (LLM) to craft a final summary that includes an overview, weather-related advice, and a description of the transport options.
+-   **Asynchronous Pattern**: It follows the same `submit` -> `status` -> `result` asynchronous protocol to handle the summarization task.
 
-## 環境變數
+## 2. Environment Variables
 
-| 變數 | 說明 | 預設值 |
-| --- | --- | --- |
-| `PORT` | 服務監聽的埠號 | `50003` |
-| `LLM_PROVIDER` | 模型提供者名稱（例如 `bedrock`、`openai`） | `bedrock` |
-| `LLM_MODEL_ID` | 指定使用的模型 ID | `anthropic.claude-3-haiku-20240307-v1:0` |
+-   `PORT`: The port for the FastAPI application. Default: `50003`.
+-   `SUMMARY_MODEL_PROVIDER`: The provider for the LLM used for summarization. Default: `bedrock`.
+-   `SUMMARY_MODEL_ID`: The specific model ID for the LLM.
+-   `METRICS_ENABLED`: Set to `true` to expose a `/metrics` endpoint for Prometheus.
 
-## API 介面
+## 3. JSON-RPC API Usage
 
-### `GET /`
+All interactions are via JSON-RPC calls to the `/jsonrpc` endpoint.
 
-回傳服務狀態與目前使用的模型設定。
+### Method: `a2a.submit_task`
 
-### `POST /summaries`
+Submits a new task to generate the final summary. The `task_id` should be the same as the `root-agent`'s main task ID for traceability.
 
-請求格式如下，所有日期皆採 `YYYY-MM-DD` 格式，時間採 24 小時制：
+**Request:**
 
 ```json
 {
-  "task_id": "demo-task",
-  "user_requirement": {
-    "origin": "台北",
-    "destination": "高雄",
-    "travel_date": "2024-08-25",
-    "desired_arrival_time": "14:30",
-    "transport_note": "希望靠近下午會議"
-  },
-  "weather_report": {
-    "city": "高雄",
-    "date": "2024-08-25",
-    "time_range": "下午",
-    "summary": "午後高溫且有局部短暫陣雨",
-    "variables": {
-      "temperature_c": 32.1,
-      "humidity_percent": 70,
-      "wind_speed_kmh": 18.5,
-      "precipitation_chance_percent": 55,
-      "precipitation_mm": 4.3,
-      "air_quality": "普通",
-      "special_weather": "午後雷陣雨"
+  "jsonrpc": "2.0",
+  "method": "a2a.submit_task",
+  "params": {
+    "task_id": "root-task-id-123",
+    "user_requirement": {
+      "origin": "台北",
+      "destination": "台南",
+      "travel_date": "2024-10-25",
+      "desired_arrival_time": "15:30"
+    },
+    "weather_report": {
+      "city": "台南",
+      "date": "2024-10-25",
+      "summary": "天氣晴朗..."
+    },
+    "transport": {
+      "destination": "台南",
+      "plans": [ { "type": "高鐵", ... } ]
     }
   },
-  "transport": {
-    "destination": "高雄",
-    "requested_arrival_time": "14:30",
-    "date": "2024-08-25",
-    "plans": [
-      {
-        "stations": { "origin": "台北", "destination": "高雄" },
-        "time": { "departure": "08:10", "arrival": "12:20" },
-        "date": "2024-08-25",
-        "pricing_and_service": { "price": 1490, "service_number": "T123" }
-      }
-    ]
-  }
+  "id": 1
 }
 ```
 
-成功回傳會包含：
+**Success Response:**
 
-- `overview`：旅程摘要與注意事項。
-- `recommended_plans`：三個最佳班次（旅程最短、票價最省、抵達時間最接近）。
-- `weather_summary`：Weather Agent 的摘要。
-- `weather_reminders`：依據溫度、降雨機率等資訊產出的提醒（例如攜帶雨具、防曬、補充水分）。
-
-## 本地啟動
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 50003 --reload
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "task_id": "root-task-id-123"
+  },
+  "id": 1
+}
 ```
 
-啟動後可用下列指令測試：
+### Method: `a2a.get_task_status`
 
-```bash
-curl -X POST http://127.0.0.1:50003/summaries \
-  -H "Content-Type: application/json" \
-  -d @payload.json
+Checks the status of the summarization task.
+
+**Request:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "a2a.get_task_status",
+  "params": {
+    "task_id": "root-task-id-123"
+  },
+  "id": 2
+}
 ```
 
-請將上述 JSON 內容存成 `payload.json` 再執行測試。
+**Success Response (Example):**
 
+The status will progress from `PENDING` -> `IN_PROGRESS` -> `DONE`.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "task_id": "root-task-id-123",
+    "status": "IN_PROGRESS"
+  },
+  "id": 2
+}
+```
+
+### Method: `a2a.get_task_result`
+
+Retrieves the final, synthesized travel plan.
+
+**Request:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "a2a.get_task_result",
+  "params": {
+    "task_id": "root-task-id-123"
+  },
+  "id": 3
+}
+```
+
+**Success Response (when ready):**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "task_id": "root-task-id-123",
+    "status": "DONE",
+    "result": {
+      "task_id": "root-task-id-123",
+      "overview": "為您規劃的台南行程...",
+      "weather_advice": "天氣很好，建議穿著輕便...",
+      "transport_options": "建議您搭乘高鐵 0837 號班次..."
+    }
+  },
+  "id": 3
+}
+```
+
+## 4. Local Testing Guide
+
+To test this agent directly, you would need to provide it with mock data that simulates the outputs of the other agents.
+
+1.  **Submit the task with mock data:**
+
+    ```bash
+    curl -X POST http://127.0.0.1:50003/jsonrpc \
+      -H "Content-Type: application/json" \
+      -d '{
+            "jsonrpc": "2.0",
+            "method": "a2a.submit_task",
+            "params": {
+              "task_id": "manual-summary-test-01",
+              "user_requirement": { "origin": "台北", "destination": "台南", "travel_date": "2024-10-25", "desired_arrival_time": "15:30" },
+              "weather_report": { "city": "台南", "date": "2024-10-25", "summary": "天氣晴朗，氣溫舒適。" },
+              "transport": { "destination": "台南", "plans": [ { "type": "高鐵", "train_number": "0837", "departure_time": "13:55", "arrival_time": "15:31", "note": "最快選項" } ] }
+            },
+            "id": 1
+          }'
+    ```
+
+    (Save the `task_id` from the response)
+
+2.  **Check the status and get the result** using the same `a2a.get_task_status` and `a2a.get_task_result` patterns as the other agents, pointing to port `50003`.
