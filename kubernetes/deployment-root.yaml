@@ -12,6 +12,7 @@ spec:
     metadata:
       labels:
         app: root-agent
+        version: "v1.0.0-local-mode" # Add a version label to force restart
     spec:
       # 對齊 tfvars：root_agent_sa_name = "ds-a2a-root-agent-sa"
       serviceAccountName: ds-a2a-root-agent-sa
