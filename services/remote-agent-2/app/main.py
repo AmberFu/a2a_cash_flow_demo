@@ -184,7 +184,7 @@ def healthcheck() -> JSONResponse:
 async def jsonrpc_endpoint(request: Request):
     """The main JSON-RPC endpoint that dispatches to the registered methods."""
     req_str = await request.body()
-    response = await dispatch(req_str.decode())
+    response = dispatch(req_str.decode())
     if response.wanted:
         return JSONResponse(content=response.deserialized(), status_code=response.http_status)
     return JSONResponse(content=None, status_code=204)

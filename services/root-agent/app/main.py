@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
@@ -74,10 +75,9 @@ async def a2a_submit_task(loan_case_id: str, user_requirement: Dict[str, Any]) -
         summary_result={},
     )
 
-    # Run the graph asynchronously. Since our graph is fully automated and has no
-    # interruptions, we can just invoke it. The state will be updated in the checkpointer.
-    # We are using an in-memory checkpointer for this example.
-    graph_app.invoke(initial_state, config)
+    # Run the graph in the background without blocking the response to the user.
+    # asyncio.create_task is used to schedule the coroutine to run on the event loop.
+    asyncio.create_task(graph_app.ainvoke(initial_state, config))
 
     return Success({"task_id": task_id, "message": "Workflow started."})
 
@@ -150,7 +150,7 @@ async def jsonrpc_endpoint(request: Request):
     The main JSON-RPC endpoint that dispatches to the registered methods.
     """
     req_str = await request.body()
-    response = await dispatch(req_str.decode())
+    response = dispatch(req_str.decode())
     if response.wanted:
         return JSONResponse(content=response.deserialized(), status_code=response.http_status)
     return JSONResponse(content=None, status_code=204)

@@ -3,7 +3,7 @@
 import os
 import logging
 import operator
-import time
+import asyncio
 from typing import TypedDict, Annotated, List, Dict, Any
 
 from langgraph.graph import StateGraph, END
@@ -77,7 +77,7 @@ def submit_tasks_node(state: AgentState) -> dict:
         return {"status": "ERROR_SUBMISSION", "messages": [AIMessage(content=f"Error submitting tasks: {e}")]}
 
 
-def polling_node(state: AgentState) -> dict:
+async def polling_node(state: AgentState) -> dict:
     """
     Polls the remote agents until their tasks are complete.
     """
@@ -99,7 +99,7 @@ def polling_node(state: AgentState) -> dict:
         else:
             # Not all tasks are done, so we'll loop back to this node.
             # Add a delay to prevent busy-waiting.
-            time.sleep(2)
+            await asyncio.sleep(2)
             message = AIMessage(content=f"Waiting for remote agents... (Weather: {status1}, Transport: {status2})")
             # Return only messages, the status remains "POLLING"
             return {"messages": [message]}
