@@ -40,6 +40,7 @@ tasks_lock = threading.Lock()
 async def lifespan(app: FastAPI):
     """初始化與釋放 Remote Agent 需要的資源。"""
     logger.info("Transport Remote Agent (Async) is starting up on port %s", PORT)
+    logger.info(f"Registered JSON-RPC methods: {jsonrpcserver.methods.items()}")
     yield
     logger.info("Transport Remote Agent (Async) is shutting down")
 
@@ -105,7 +106,7 @@ def execute_transport_plan_task(task_id: str, params: Dict[str, Any]):
 
 # --- JSON-RPC Method Implementations ---
 
-@method
+@method(name="a2a.submit_task")
 async def a2a_submit_task(user_requirement: Dict[str, Any]) -> Dict[str, str]:
     """
     Submits a new task for transport plan generation.
@@ -127,7 +128,7 @@ async def a2a_submit_task(user_requirement: Dict[str, Any]) -> Dict[str, str]:
     return Success({"task_id": task_id})
 
 
-@method
+@method(name="a2a.get_task_status")
 async def a2a_get_task_status(task_id: str) -> Dict[str, str]:
     """Checks the status of a previously submitted task."""
     logger.debug(f"Checking status for task_id: {task_id}")
@@ -141,7 +142,7 @@ async def a2a_get_task_status(task_id: str) -> Dict[str, str]:
     return Success({"task_id": task_id, "status": task["status"]})
 
 
-@method
+@method(name="a2a.get_task_result")
 async def a2a_get_task_result(task_id: str) -> Dict[str, Any]:
     """Retrieves the result of a completed task."""
     logger.debug(f"Requesting result for task_id: {task_id}")
@@ -185,6 +186,12 @@ def healthcheck() -> JSONResponse:
 async def jsonrpc_endpoint(request: Request):
     """The main JSON-RPC endpoint that dispatches to the registered methods."""
     req_str = await request.body()
+    try:
+        req_data = json.loads(req_str.decode())
+        logger.info(f"Received JSON-RPC request: {req_data}")
+    except json.JSONDecodeError:
+        logger.warning(f"Received non-JSON request body: {req_str.decode()}")
+
     response_str = await async_dispatch(req_str.decode(), methods=globals())
     if response_str:
         response_json = json.loads(response_str)

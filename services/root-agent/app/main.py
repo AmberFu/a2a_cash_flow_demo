@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Root Agent (Async) is starting up...")
+    logger.info(f"Registered JSON-RPC methods: {jsonrpcserver.methods.items()}")
     yield
     logger.info("Root Agent (Async) is shutting down...")
 
@@ -54,7 +55,7 @@ graph_app = get_graph_app()
 
 # --- JSON-RPC Method Implementations ---
 
-@method
+@method(name="a2a.submit_task")
 async def a2a_submit_task(loan_case_id: str, user_requirement: Dict[str, Any]) -> Dict[str, Any]:
     """
     Starts the asynchronous agent workflow.
@@ -83,7 +84,7 @@ async def a2a_submit_task(loan_case_id: str, user_requirement: Dict[str, Any]) -
 
     return Success({"task_id": task_id, "message": "Workflow started."})
 
-@method
+@method(name="a2a.get_task_status")
 async def a2a_get_task_status(task_id: str) -> Dict[str, Any]:
     """
     Checks the status of the entire workflow.
@@ -102,7 +103,7 @@ async def a2a_get_task_status(task_id: str) -> Dict[str, Any]:
         logger.error(f"Error getting status for task {task_id}: {e}", exc_info=True)
         return Error(code=500, message="Internal server error")
 
-@method
+@method(name="a2a.get_task_result")
 async def a2a_get_task_result(task_id: str) -> Dict[str, Any]:
     """
     Retrieves the final result from the summary agent once the workflow is complete.
@@ -152,6 +153,12 @@ async def jsonrpc_endpoint(request: Request):
     The main JSON-RPC endpoint that dispatches to the registered methods.
     """
     req_str = await request.body()
+    try:
+        req_data = json.loads(req_str.decode())
+        logger.info(f"Received JSON-RPC request: {req_data}")
+    except json.JSONDecodeError:
+        logger.warning(f"Received non-JSON request body: {req_str.decode()}")
+
     response_str = await async_dispatch(req_str.decode(), methods=globals())
     if response_str:
         response_json = json.loads(response_str)

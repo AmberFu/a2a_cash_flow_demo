@@ -41,6 +41,7 @@ tasks_lock = threading.Lock()
 async def lifespan(app: FastAPI):
     """初始化與釋放摘要代理需要的資源。"""
     logger.info("Summary Agent (Async) is starting up on port %s", settings.port)
+    logger.info(f"Registered JSON-RPC methods: {jsonrpcserver.methods.items()}")
     yield
     logger.info("Summary Agent (Async) is shutting down")
 
@@ -96,7 +97,7 @@ def execute_summary_task(task_id: str, params: Dict[str, Any]):
 
 # --- JSON-RPC Method Implementations ---
 
-@method
+@method(name="a2a.submit_task")
 async def a2a_submit_task(
     task_id: str, # root-agent will pass its own task_id
     user_requirement: dict,
@@ -129,7 +130,7 @@ async def a2a_submit_task(
     return Success({"task_id": summary_task_id})
 
 
-@method
+@method(name="a2a.get_task_status")
 async def a2a_get_task_status(task_id: str) -> Dict[str, str]:
     """Checks the status of a previously submitted summary task."""
     logger.debug(f"Checking status for summary task_id: {task_id}")
@@ -143,7 +144,7 @@ async def a2a_get_task_status(task_id: str) -> Dict[str, str]:
     return Success({"task_id": task_id, "status": task["status"]})
 
 
-@method
+@method(name="a2a.get_task_result")
 async def a2a_get_task_result(task_id: str) -> Dict[str, Any]:
     """Retrieves the result of a completed summary task."""
     logger.debug(f"Requesting result for summary task_id: {task_id}")
@@ -187,6 +188,12 @@ def healthcheck() -> JSONResponse:
 async def jsonrpc_endpoint(request: Request):
     """The main JSON-RPC endpoint that dispatches to the registered methods."""
     req_str = await request.body()
+    try:
+        req_data = json.loads(req_str.decode())
+        logger.info(f"Received JSON-RPC request: {req_data}")
+    except json.JSONDecodeError:
+        logger.warning(f"Received non-JSON request body: {req_str.decode()}")
+
     response_str = await async_dispatch(req_str.decode(), methods=globals())
     if response_str:
         response_json = json.loads(response_str)
