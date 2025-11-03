@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
-from jsonrpcserver import dispatch, method, Success, Error
+from jsonrpcserver import async_dispatch, method, Success, Error
 
 from llm import synthesize_weather_summary
 from models import WeatherReportRequest, WeatherReportResponse
@@ -190,7 +190,7 @@ async def jsonrpc_endpoint(request: Request):
     """The main JSON-RPC endpoint that dispatches to the registered methods."""
     req_str = await request.body()
     # The 'dispatch' function from jsonrpcserver will call the decorated @method functions
-    response = dispatch(req_str.decode())
+    response = await async_dispatch(req_str.decode())
     if response.wanted:
         return JSONResponse(content=response.deserialized(), status_code=response.http_status)
     # Return 204 No Content for notifications

@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
-from jsonrpcserver import dispatch, method, Success, Error
+from jsonrpcserver import async_dispatch, method, Success, Error
 
 from a2a.graph import get_graph_app, AgentState
 from a2a import tools as agent_tools
@@ -150,7 +150,7 @@ async def jsonrpc_endpoint(request: Request):
     The main JSON-RPC endpoint that dispatches to the registered methods.
     """
     req_str = await request.body()
-    response = dispatch(req_str.decode())
+    response = await async_dispatch(req_str.decode())
     if response.wanted:
         return JSONResponse(content=response.deserialized(), status_code=response.http_status)
     return JSONResponse(content=None, status_code=204)
