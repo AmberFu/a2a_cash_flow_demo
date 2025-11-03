@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
+import jsonrpcserver
 from jsonrpcserver import async_dispatch, method, Success, Error
 
 from a2a.graph import get_graph_app, AgentState

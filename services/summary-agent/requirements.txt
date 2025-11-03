@@ -1,4 +1,4 @@
 fastapi
 prometheus-fastapi-instrumentator
 uvicorn[standard]
-jsonrpcserver
+jsonrpcserver>=5.0.0
