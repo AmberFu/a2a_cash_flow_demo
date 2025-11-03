@@ -6,6 +6,7 @@ import os
 import uuid
 import threading
 import time
+import json
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 
@@ -186,9 +187,10 @@ def healthcheck() -> JSONResponse:
 async def jsonrpc_endpoint(request: Request):
     """The main JSON-RPC endpoint that dispatches to the registered methods."""
     req_str = await request.body()
-    response = await async_dispatch(req_str.decode())
-    if response.wanted:
-        return JSONResponse(content=response.deserialized(), status_code=response.http_status)
+    response_str = await async_dispatch(req_str.decode())
+    if response_str:
+        response_json = json.loads(response_str)
+        return JSONResponse(content=response_json)
     return JSONResponse(content=None, status_code=204)
 
 if __name__ == "__main__":
