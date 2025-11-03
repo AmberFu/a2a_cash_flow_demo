@@ -10,6 +10,7 @@ import json
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
+import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -151,7 +152,7 @@ async def jsonrpc_endpoint(request: Request):
     The main JSON-RPC endpoint that dispatches to the registered methods.
     """
     req_str = await request.body()
-    response_str = await async_dispatch(req_str.decode())
+    response_str = await async_dispatch(req_str.decode(), methods=globals())
     if response_str:
         response_json = json.loads(response_str)
         return JSONResponse(content=response_json)
