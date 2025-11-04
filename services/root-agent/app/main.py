@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Root Agent (Async) is starting up...")
-    logger.info(f"Registered JSON-RPC methods: {jsonrpcserver.methods.items()}")
+    logger.info(f"Registered JSON-RPC methods: {jsonrpcserver.methods.global_methods}")
     yield
     logger.info("Root Agent (Async) is shutting down...")
 
@@ -159,7 +159,9 @@ async def jsonrpc_endpoint(request: Request):
     except json.JSONDecodeError:
         logger.warning(f"Received non-JSON request body: {req_str.decode()}")
 
-    response_str = await async_dispatch(req_str.decode(), methods=globals())
+    # logger.info(f"\n>>> globals(): {globals()}\n")
+    response_str = await async_dispatch(req_str.decode())
+    logger.info(f"response_str: {response_str}")
     if response_str:
         response_json = json.loads(response_str)
         return JSONResponse(content=response_json)
