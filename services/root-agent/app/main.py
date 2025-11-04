@@ -1,387 +1,171 @@
-from contextlib import asynccontextmanager
+# services/root-agent/app/main.py
+"""Root Agent (Async JSON-RPC): Manages and dispatches tasks."""
+from __future__ import annotations
+
 import logging
 import os
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+import asyncio
+import json
+from contextlib import asynccontextmanager
+from typing import Any, Dict
 
+import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
-import uvicorn
+import jsonrpcserver
+from jsonrpcserver import async_dispatch, method, Success, Error
 
-from a2a.graph import get_graph_app
+from a2a.graph import get_graph_app, AgentState
 from a2a import tools as agent_tools
-from langchain_core.messages import HumanMessage, ToolMessage
-from models import (
-    CallbackRequest,
-    CreateTaskRequest,
-    CreateTaskResponse,
-    HITLAnswerRequest,
-    UserRequirement,
-)
-
 
 # --- Application Setup ---
 PORT = int(os.environ.get("PORT", 50000))
-JSONRPC_ENABLED = os.environ.get("JSONRPC_ENABLED", "false").lower() == "true"
-JSONRPC_BASE_PATH = os.environ.get("JSONRPC_BASE_PATH", "/jsonrpc")
-JSONRPC_BIND = os.environ.get("JSONRPC_BIND", "0.0.0.0")
-JSONRPC_PORT = int(os.environ.get("JSONRPC_PORT", PORT))
-SUMMARY_URL = os.environ.get("SUMMARY_URL", "http://summary-agent-service")
-REMOTE1_URL = os.environ.get("REMOTE1_URL", "http://remote-agent-1-service")
-REMOTE2_URL = os.environ.get("REMOTE2_URL", "http://remote-agent-2-service")
-ROOT_LLM_PROVIDER = os.environ.get("ROOT_LLM_PROVIDER", "bedrock")
-ROOT_LLM_MODEL_ID = os.environ.get(
-    "ROOT_LLM_MODEL_ID", "anthropic.claude-3-opus-20240229-v1:0"
-)
-REMOTE1_MODEL_PROVIDER = os.environ.get("REMOTE1_MODEL_PROVIDER", "bedrock")
-REMOTE1_MODEL_ID = os.environ.get(
-    "REMOTE1_MODEL_ID", "anthropic.claude-3-sonnet-20240229-v1:0"
-)
-REMOTE2_MODEL_PROVIDER = os.environ.get("REMOTE2_MODEL_PROVIDER", "bedrock")
-REMOTE2_MODEL_ID = os.environ.get(
-    "REMOTE2_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
-)
-SUMMARY_MODEL_PROVIDER = os.environ.get("SUMMARY_MODEL_PROVIDER", "bedrock")
-SUMMARY_MODEL_ID = os.environ.get(
-    "SUMMARY_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
-)
 METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
 
+# --- Logging Configuration ---
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
 )
-logging.getLogger("langgraph").setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-
+# --- FastAPI Lifespan ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Application is starting up...")
-    try:
-        yield
-    finally:
-        logger.info("Application is shutting down...")
-
+    logger.info("Root Agent (Async) is starting up...")
+    logger.info(f"Registered JSON-RPC methods: {jsonrpcserver.methods.global_methods}")
+    yield
+    logger.info("Root Agent (Async) is shutting down...")
 
 app = FastAPI(
-    title="A2A Root Agent API",
-    description="Manages and dispatches tasks for the A2A Cash Flow Demo",
+    title="A2A Root Agent (Async)",
+    description="Manages and orchestrates tasks via async JSON-RPC.",
     version="1.0.0",
     lifespan=lifespan,
 )
+
 if METRICS_ENABLED:
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
-else:
-    logger.info("Prometheus instrumentation disabled via METRICS_ENABLED=false")
 
 # Initialize the LangGraph Application
-# This creates the compiled graph with its checkpointer
 graph_app = get_graph_app()
 
 
-# --- Helper functions ---
-def build_agent_card() -> Dict[str, Any]:
-    """Return Agent Card metadata for JSON-RPC describe_agent."""
-    return {
-        "agent_id": "root-agent",
-        "name": "Root Agent",
-        "protocols": [
-            {"type": "json-rpc", "version": "2.0", "transport": "https", "endpoint": JSONRPC_BASE_PATH},
-            {"type": "eventbridge", "transport": "aws", "callback_queue": "sqs"},
-        ],
-        "capabilities": [
-            {
-                "id": "task.dispatch.weather",
-                "target": REMOTE1_URL,
-                "llm": {"provider": REMOTE1_MODEL_PROVIDER, "id": REMOTE1_MODEL_ID},
-            },
-            {
-                "id": "task.dispatch.train",
-                "target": REMOTE2_URL,
-                "llm": {"provider": REMOTE2_MODEL_PROVIDER, "id": REMOTE2_MODEL_ID},
-            },
-            {
-                "id": "task.summarize",
-                "target": SUMMARY_URL,
-                "llm": {"provider": SUMMARY_MODEL_PROVIDER, "id": SUMMARY_MODEL_ID},
-            },
-        ],
-        "model": {"provider": ROOT_LLM_PROVIDER, "id": ROOT_LLM_MODEL_ID},
-        "maintainer": {"team": "A2A Demo", "email": "a2a@example.com"},
-    }
+# --- JSON-RPC Method Implementations ---
 
-
-def get_task_state_snapshot(task_id: str) -> Tuple[str, Dict[str, Any]]:
-    """Fetch the latest state from LangGraph and return status plus payload."""
-    config = {"configurable": {"thread_id": task_id}}
-    state = graph_app.get_state(config)
-    if not state:
-        raise KeyError(task_id)
-
-    if isinstance(state, dict):
-        values: Dict[str, Any] = state
-    elif hasattr(state, "values"):
-        values_attr = getattr(state, "values")
-        if callable(values_attr):
-            values = values_attr()
-        else:
-            values = values_attr
-    else:
-        values = {"raw": state}
-
-    status = values.get("status", "unknown")
-    return status, values
-
-
-async def start_graph_run(
-    loan_case_id: str, user_requirement: Optional[UserRequirement]
-) -> CreateTaskResponse:
+@method(name="a2a.submit_task")
+async def a2a_submit_task(loan_case_id: str, user_requirement: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Starts the asynchronous agent workflow.
+    """
     task_id = str(uuid.uuid4())
-    logger.info(
-        "Received request to create task for loan case: %s. Assigned Task ID: %s",
-        loan_case_id,
-        task_id,
-    )
+    logger.info(f"Received task for loan_case_id={loan_case_id}. Assigned root_task_id={task_id}")
+
     config = {"configurable": {"thread_id": task_id}}
-
-    requirement_payload: Dict[str, Any] = {}
-    if user_requirement is not None:
-        requirement_payload = user_requirement.model_dump()
-
-    travel_summary = (
-        f"Start processing for loan case ID: {loan_case_id}."
-        if not requirement_payload
-        else (
-            "Start processing for loan case ID: "
-            f"{loan_case_id} with travel requirement: {requirement_payload}."
-        )
+    initial_state = AgentState(
+        task_id=task_id,
+        loan_case_id=loan_case_id,
+        user_requirement=user_requirement,
+        status="new",
+        messages=[],
+        remote1_task_id="",
+        remote2_task_id="",
+        summary_task_id="",
+        remote1_result={},
+        remote2_result={},
+        summary_result={},
     )
-    initial_state = {
-        "task_id": task_id,
-        "loan_case_id": loan_case_id,
-        "status": "new",
-        "messages": [HumanMessage(content=travel_summary)],
-        "needs_info": [],
-        "human_answer": "",
-        "user_requirement": requirement_payload,
-        "weather_report": {},
-        "transport": {},
-        "summary": {},
-    }
-    result_state: Optional[Any] = None
-    try:
-        logger.info(">>> Start graph_app.invoke via start_graph_run...")
-        result_state = graph_app.invoke(initial_state, config=config)
-        logger.info(">>> Graph finished")
-    except Exception as exc:  # pragma: no cover - runtime safety
-        logger.error("Failed to start graph for task %s. Error: %s", task_id, exc)
-        if "events" in str(exc) or "PutEvents" in str(exc):
-            raise HTTPException(
-                status_code=503,
-                detail=f"Workflow failed to start due to external AWS service error (EventBridge/DynamoDB): {exc}",
-            ) from exc
-        raise HTTPException(status_code=500, detail=f"Failed to start workflow: {exc}") from exc
 
-    summary_payload: Optional[Dict[str, Any]] = None
-    status: Optional[str] = None
-    if not agent_tools.is_eventbridge_mode():
-        values: Dict[str, Any] = {}
-        if result_state is not None:
-            if isinstance(result_state, dict):
-                values = result_state
-            elif hasattr(result_state, "values"):
-                values_attr = getattr(result_state, "values")
-                if callable(values_attr):
-                    values = values_attr()
-                else:
-                    values = values_attr
-        summary_payload = values.get("summary")
-        status = values.get("status")
-        if not values:
-            logger.warning(
-                "Task %s returned empty state in local mode; summary may be unavailable",
-                task_id,
+    # Run the graph in the background without blocking the response to the user.
+    # asyncio.create_task is used to schedule the coroutine to run on the event loop.
+    asyncio.create_task(graph_app.ainvoke(initial_state, config))
+
+    return Success({"task_id": task_id, "message": "Workflow started."})
+
+@method(name="a2a.get_task_status")
+async def a2a_get_task_status(task_id: str) -> Dict[str, Any]:
+    """
+    Checks the status of the entire workflow.
+    """
+    config = {"configurable": {"thread_id": task_id}}
+    try:
+        state = graph_app.get_state(config)
+        if not state:
+            return Error(code=404, message="Task not found", data={"task_id": task_id})
+
+        # The state object from get_state is a StateSnapshot, we need its values
+        status = state.values.get("status", "UNKNOWN")
+        return Success({"task_id": task_id, "status": status})
+
+    except Exception as e:
+        logger.error(f"Error getting status for task {task_id}: {e}", exc_info=True)
+        return Error(code=500, message="Internal server error")
+
+@method(name="a2a.get_task_result")
+async def a2a_get_task_result(task_id: str) -> Dict[str, Any]:
+    """
+    Retrieves the final result from the summary agent once the workflow is complete.
+    """
+    config = {"configurable": {"thread_id": task_id}}
+    try:
+        state_snapshot = graph_app.get_state(config)
+        if not state_snapshot:
+            return Error(code=404, message="Task not found", data={"task_id": task_id})
+
+        state = state_snapshot.values
+        if state.get("status") != "COMPLETED":
+            return Error(
+                code=202,
+                message="Task result is not ready yet.",
+                data={"task_id": task_id, "status": state.get("status")},
             )
 
-    return CreateTaskResponse(
-        task_id=task_id,
-        message="Task created and workflow initiated.",
-        status=status,
-        summary=summary_payload,
-    )
+        summary_task_id = state.get("summary_task_id")
+        if not summary_task_id:
+            return Error(code=500, message="Summary task ID not found in completed workflow.")
+
+        # The root task ID is the same as the summary task ID in our new graph design
+        final_result = agent_tools.get_task_result_from_remote_agent(
+            agent_tools.SUMMARY_URL, summary_task_id
+        )
+
+        return Success({
+            "task_id": task_id,
+            "status": "COMPLETED",
+            "result": final_result
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting result for task {task_id}: {e}", exc_info=True)
+        return Error(code=500, message=f"Internal server error: {e}")
 
 
-def jsonrpc_error(code: int, message: str, request_id: Any) -> JSONResponse:
-    status_code = 400 if code in {-32600, -32601, -32602, -32700} else 500
-    return JSONResponse(
-        status_code=status_code,
-        content={"jsonrpc": "2.0", "error": {"code": code, "message": message}, "id": request_id},
-    )
-
-
-async def handle_jsonrpc_call(method: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    if method == "a2a.describe_agent":
-        return build_agent_card()
-    if method == "a2a.get_task_status":
-        task_id = params.get("task_id")
-        if not task_id:
-            raise ValueError("task_id is required")
-        try:
-            status, values = get_task_state_snapshot(task_id)
-        except KeyError:
-            return {"task_id": task_id, "status": "not_found"}
-        return {"task_id": task_id, "status": status, "state": values}
-    if method == "a2a.submit_task":
-        payload = params.get("payload", {})
-        loan_case_id = payload.get("loan_case_id") or params.get("loan_case_id")
-        if not loan_case_id:
-            raise ValueError("loan_case_id is required")
-        requirement_payload = payload.get("user_requirement") or params.get("user_requirement")
-        requirement_model: Optional[UserRequirement] = None
-        if requirement_payload:
-            requirement_model = UserRequirement(**requirement_payload)
-        response = await start_graph_run(loan_case_id, requirement_model)
-        return {
-            "task_id": response.task_id,
-            "message": response.message,
-            "status": response.status,
-            "summary": response.summary,
-            "channels": ["eventbridge", "jsonrpc"],
-        }
-    raise NotImplementedError(f"Method {method} not found")
-
-
-# --- API Endpoints ---
+# --- FastAPI Endpoints ---
 @app.get("/")
 def read_root():
-    return {"message": "Root Agent is running."}
+    return {"message": "Root Agent (Async) is running."}
 
-
-@app.post("/tasks", response_model=CreateTaskResponse, status_code=202)
-async def create_task(request: CreateTaskRequest):
-    response = await start_graph_run(request.loan_case_id, request.user_requirement)
-    return response
-
-
-@app.post("/callbacks", status_code=200)
-async def handle_callback(request: CallbackRequest):
-    """Endpoint to receive results from remote agents via SQS."""
-    task_id = request.task_id
-    logger.info("Received callback for task %s from %s with status '%s'", task_id, request.source, request.status)
-
-    config = {"configurable": {"thread_id": task_id}}
-
+@app.post("/jsonrpc")
+async def jsonrpc_endpoint(request: Request):
+    """
+    The main JSON-RPC endpoint that dispatches to the registered methods.
+    """
+    req_str = await request.body()
     try:
-        current_state = graph_app.get_state(config)
-        if not current_state:
-            raise HTTPException(status_code=404, detail=f"Task with ID '{task_id}' not found.")
+        req_data = json.loads(req_str.decode())
+        logger.info(f"Received JSON-RPC request: {req_data}")
+    except json.JSONDecodeError:
+        logger.warning(f"Received non-JSON request body: {req_str.decode()}")
 
-        state_update: Dict[str, Any] = {"status": request.status}
-        if request.needs_info:
-            state_update["needs_info"] = request.needs_info
-            state_update["status"] = "awaiting_human_input"
-
-        graph_app.update_state(config, state_update)
-
-        tool_message = ToolMessage(
-            content=f"Received result from {request.source}: {request.result}",
-            name=request.source,
-        )
-
-        graph_app.invoke({"messages": [tool_message]}, config)
-
-    except HTTPException:
-        raise
-    except Exception as exc:  # pragma: no cover - runtime safety
-        logger.error("Error processing callback for task %s. Error: %s", task_id, exc)
-        raise HTTPException(status_code=500, detail=f"Failed to process callback: {exc}") from exc
-
-    return {"message": f"Callback for task {task_id} processed."}
-
-
-@app.post("/tasks/{task_id}/answers", status_code=200)
-async def submit_hitl_answer(task_id: str, request: HITLAnswerRequest):
-    """Endpoint for a human to submit required information, resuming the graph."""
-    logger.info("Received HITL answer for task %s.", task_id)
-    config = {"configurable": {"thread_id": task_id}}
-
-    try:
-        current_state = graph_app.get_state(config)
-        if not current_state:
-            raise HTTPException(status_code=404, detail=f"Task with ID '{task_id}' not found.")
-
-        if getattr(current_state, "values", {}).get("status") != "needs_human_input":
-            raise HTTPException(status_code=400, detail=f"Task '{task_id}' is not awaiting human input.")
-
-        graph_app.update_state(
-            config,
-            {
-                "human_answer": request.answer,
-                "status": "resuming_after_hitl",
-            },
-        )
-
-        human_message = HumanMessage(content=f"Human provided answer: {request.answer}")
-        graph_app.invoke({"messages": [human_message]}, config)
-
-    except HTTPException:
-        raise
-    except Exception as exc:  # pragma: no cover - runtime safety
-        logger.error("Error processing HITL answer for task %s. Error: %s", task_id, exc)
-        raise HTTPException(status_code=500, detail=f"Failed to process HITL answer: {exc}") from exc
-
-    return {"message": f"HITL answer for task {task_id} submitted and workflow resumed."}
-
-
-@app.post(JSONRPC_BASE_PATH)
-async def jsonrpc_endpoint(raw_request: Request):
-    """Handle JSON-RPC 2.0 calls for synchronous integrations."""
-    if not JSONRPC_ENABLED:
-        # 仍回應符合 JSON-RPC 2.0 規範的錯誤，以利客戶端診斷。
-        return jsonrpc_error(
-            -32000,
-            "JSON-RPC channel is currently disabled on the Root Agent.",
-            None,
-        )
-
-    try:
-        payload = await raw_request.json()
-    except Exception:  # noqa: BLE001 - FastAPI already logs details
-        return jsonrpc_error(-32700, "Parse error", None)
-
-    if isinstance(payload, list):
-        return jsonrpc_error(-32600, "Batch requests are not supported", None)
-
-    method = payload.get("method")
-    request_id = payload.get("id")
-    params = payload.get("params") or {}
-    if not method:
-        return jsonrpc_error(-32600, "method is required", request_id)
-
-    try:
-        result = await handle_jsonrpc_call(method, params)
-    except ValueError as exc:
-        return jsonrpc_error(-32602, str(exc), request_id)
-    except NotImplementedError as exc:
-        return jsonrpc_error(-32601, str(exc), request_id)
-    except HTTPException as exc:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={
-                "jsonrpc": "2.0",
-                "error": {"code": -32000, "message": exc.detail},
-                "id": request_id,
-            },
-        )
-    except Exception as exc:  # pragma: no cover - runtime safety
-        logger.exception("Unhandled JSON-RPC error: %s", exc)
-        return jsonrpc_error(-32603, "Internal error", request_id)
-
-    return {"jsonrpc": "2.0", "result": result, "id": request_id}
-
+    # logger.info(f"\n>>> globals(): {globals()}\n")
+    response_str = await async_dispatch(req_str.decode())
+    logger.info(f"response_str: {response_str}")
+    if response_str:
+        response_json = json.loads(response_str)
+        return JSONResponse(content=response_json)
+    return JSONResponse(content=None, status_code=204)
 
 if __name__ == "__main__":
-    # 注意：reload 在容器內要搭配掛載原始碼才看得到變更
-    uvicorn.run(app="main:app", host=JSONRPC_BIND, port=JSONRPC_PORT)
+    uvicorn.run(app="main:app", host="0.0.0.0", port=PORT, reload=True)

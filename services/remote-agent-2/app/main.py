@@ -1,122 +1,204 @@
-"""Transport plan Remote Agent service entrypoint."""
-
+"""交通規劃 Remote Agent 服務 (Async JSON-RPC)。"""
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import logging
 import os
+import uuid
+import threading
+import time
+import json
+from contextlib import asynccontextmanager
+from typing import Dict, Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 import uvicorn
-from jsonrpcserver import dispatch
+import jsonrpcserver
+from jsonrpcserver import async_dispatch, method, Success, Error
 
 from models import TransportPlanRequest, TransportPlanResponse
 from transport_service import generate_transport_plans
 
-
-LOG_FORMAT = "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
-logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
-logger = logging.getLogger(__name__)
-
-
+# --- Agent Configuration ---
 PORT = int(os.environ.get("PORT", 50002))
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "bedrock")
-LLM_MODEL_ID = os.environ.get(
-    "LLM_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
-)
 METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true").lower() == "true"
 
+# --- Logging Setup ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(threadName)s - %(filename)s:%(lineno)d - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
+# --- In-Memory Task Storage ---
+tasks: Dict[str, Dict[str, Any]] = {}
+tasks_lock = threading.Lock()
+
+
+# --- Lifespan Management ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Remote Agent 2 is starting up...")
-    try:
-        yield
-    finally:
-        logger.info("Remote Agent 2 is shutting down...")
-
+    """初始化與釋放 Remote Agent 需要的資源。"""
+    logger.info("Transport Remote Agent (Async) is starting up on port %s", PORT)
+    logger.info(f"Registered JSON-RPC methods: {jsonrpcserver.methods.global_methods}")
+    yield
+    logger.info("Transport Remote Agent (Async) is shutting down")
 
 app = FastAPI(
-    title="Transport Remote Agent",
-    version="0.2.0",
+    title="Transport Remote Agent (Async)",
+    version="1.0.0",
+    description="提供交通規劃的非同步 JSON-RPC 服務。",
     lifespan=lifespan,
 )
+
 if METRICS_ENABLED:
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
-else:
-    logger.info("Prometheus instrumentation disabled via METRICS_ENABLED=false")
 
 
-def generate_transport_plan_impl(
-    request: TransportPlanRequest,
-) -> TransportPlanResponse:
-    """Core logic for generating transport plans."""
-    logger.info(
-        "Generating %s transport plans for destination %s by %s",
-        request.results,
-        request.destination,
-        request.arrival_time,
+# --- Core Business Logic ---
+def execute_transport_plan_task(task_id: str, params: Dict[str, Any]):
+    """
+    Executes the transport plan generation in a background thread.
+    Updates the task status in the shared 'tasks' dictionary.
+    """
+    logger.info(f"Starting task {task_id} in background thread.")
+    try:
+        # 1. Update status to IN_PROGRESS
+        with tasks_lock:
+            tasks[task_id]["status"] = "IN_PROGRESS"
+
+        # Simulate some work
+        time.sleep(8) # Simulate a longer task
+
+        # 2. Execute the core logic
+        request = TransportPlanRequest(
+            destination=params.get("destination", "台南"),
+            arrival_time=params.get("desired_arrival_time", "15:30"),
+            date=params.get("travel_date", ""),
+            results=3
+        )
+        logger.info(
+            "Generating transport plans for task %s: destination=%s, arrival_time=%s",
+            task_id,
+            request.destination,
+            request.arrival_time,
+        )
+        plans = generate_transport_plans(request)
+        result = TransportPlanResponse(
+            destination=request.destination,
+            requested_arrival_time=request.arrival_time,
+            date=request.date,
+            plans=plans,
+        ).model_dump()
+
+        # 3. Update status to DONE with the result
+        with tasks_lock:
+            tasks[task_id]["status"] = "DONE"
+            tasks[task_id]["result"] = result
+        logger.info(f"Task {task_id} completed successfully.")
+
+    except Exception as e:
+        logger.error(f"Error executing task {task_id}: {e}", exc_info=True)
+        with tasks_lock:
+            tasks[task_id]["status"] = "FAILED"
+            tasks[task_id]["result"] = {"error": str(e)}
+
+
+# --- JSON-RPC Method Implementations ---
+
+@method(name="a2a.submit_task")
+async def a2a_submit_task(user_requirement: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Submits a new task for transport plan generation.
+    Returns a task_id immediately.
+    """
+    task_id = str(uuid.uuid4())
+    logger.info(f"Received new task, assigning task_id: {task_id}")
+
+    with tasks_lock:
+        tasks[task_id] = {"status": "PENDING", "result": None}
+
+    background_thread = threading.Thread(
+        target=execute_transport_plan_task,
+        args=(task_id, user_requirement),
+        name=f"Task-{task_id}"
     )
-    plans = generate_transport_plans(request)
-    return TransportPlanResponse(
-        destination=request.destination,
-        requested_arrival_time=request.arrival_time,
-        date=request.date,
-        plans=plans,
-    )
+    background_thread.start()
 
+    return Success({"task_id": task_id})
+
+
+@method(name="a2a.get_task_status")
+async def a2a_get_task_status(task_id: str) -> Dict[str, str]:
+    """Checks the status of a previously submitted task."""
+    logger.debug(f"Checking status for task_id: {task_id}")
+    with tasks_lock:
+        task = tasks.get(task_id)
+
+    if not task:
+        logger.warning(f"Task status requested for unknown task_id: {task_id}")
+        return Error(code=404, message="Task not found", data={"task_id": task_id})
+
+    return Success({"task_id": task_id, "status": task["status"]})
+
+
+@method(name="a2a.get_task_result")
+async def a2a_get_task_result(task_id: str) -> Dict[str, Any]:
+    """Retrieves the result of a completed task."""
+    logger.debug(f"Requesting result for task_id: {task_id}")
+    with tasks_lock:
+        task = tasks.get(task_id)
+
+    if not task:
+        logger.warning(f"Task result requested for unknown task_id: {task_id}")
+        return Error(code=404, message="Task not found", data={"task_id": task_id})
+
+    if task["status"] != "DONE":
+        logger.info(f"Result for task {task_id} is not ready yet. Status: {task['status']}")
+        return Error(
+            code=202,
+            message="Task result is not ready",
+            data={"task_id": task_id, "status": task["status"]},
+        )
+
+    return Success({
+        "task_id": task_id,
+        "status": task["status"],
+        "result": task["result"]
+    })
+
+
+# --- FastAPI Endpoints ---
 
 @app.get("/")
-def status() -> JSONResponse:
-    """回傳服務狀態。"""
-
-    logger.debug("Status endpoint called")
+def healthcheck() -> JSONResponse:
+    """Provides a basic health check of the service."""
+    logger.debug("Healthcheck requested")
     return JSONResponse(
         {
             "status": "OK",
-            "agent": "Remote Agent 2",
+            "agent": "Transport Remote Agent (Async)",
             "port": PORT,
-            "llm_provider": LLM_PROVIDER,
-            "llm_model_id": LLM_MODEL_ID,
         }
     )
 
-
-@app.post("/transport/plans", response_model=TransportPlanResponse)
-def generate_transport_plan_endpoint(
-    request: TransportPlanRequest,
-) -> TransportPlanResponse:
-    """RESTful endpoint for transport plans."""
-    return generate_transport_plan_impl(request)
-
-
-async def transport_plans_rpc(
-    destination: str, arrival_time: str, date: str, results: int
-) -> dict:
-    """JSON-RPC method for transport plans."""
-    request = TransportPlanRequest(
-        destination=destination,
-        arrival_time=arrival_time,
-        date=date,
-        results=results,
-    )
-    response = generate_transport_plan_impl(request)
-    return response.model_dump()
-
-
 @app.post("/jsonrpc")
 async def jsonrpc_endpoint(request: Request):
-    """JSON-RPC endpoint."""
+    """The main JSON-RPC endpoint that dispatches to the registered methods."""
     req_str = await request.body()
-    response = await dispatch(
-        req_str.decode(), methods={"transport.plans": transport_plans_rpc}
-    )
-    if response.wanted:
-        return JSONResponse(content=response.deserialized(), status_code=response.http_status)
+    try:
+        req_data = json.loads(req_str.decode())
+        logger.info(f"Received JSON-RPC request: {req_data}")
+    except json.JSONDecodeError:
+        logger.warning(f"Received non-JSON request body: {req_str.decode()}")
+
+    logger.info(f"\n>>> globals(): {globals()}\n")
+    response_str = await async_dispatch(req_str.decode(), methods=globals())
+    if response_str:
+        response_json = json.loads(response_str)
+        return JSONResponse(content=response_json)
     return JSONResponse(content=None, status_code=204)
 
-
 if __name__ == "__main__":
-    uvicorn.run(app="main:app", host="0.0.0.0", port=PORT)
+    uvicorn.run(app="main:app", host="0.0.0.0", port=PORT, reload=True)

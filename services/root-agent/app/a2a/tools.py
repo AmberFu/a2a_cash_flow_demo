@@ -1,216 +1,122 @@
 # a2a_cash_flow_demo/services/root-agent/app/a2a/tools.py
 
-import boto3
-import json
 import os
 import logging
-from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
-from jsonrpcclient import request as jsonrpc_request
+from jsonrpcclient import request as jsonrpc_request, Ok
 
 # --- Configuration ---
-# It's recommended to manage these via environment variables
-# 您的實際區域 ap-southeast-1
-AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-1")
-# 您實際 Event Bus 的名稱
-EVENT_BUS_NAME = os.getenv("EVENT_BUS_NAME", "a2a-cash-flow-demo-bus")
-
 REMOTE1_URL = os.getenv("REMOTE1_URL", "http://remote-agent-1-service:50001")
 REMOTE2_URL = os.getenv("REMOTE2_URL", "http://remote-agent-2-service:50002")
 SUMMARY_URL = os.getenv("SUMMARY_URL", "http://summary-agent-service:50003")
+WORKFLOW_MODE = os.getenv("A2A_WORKFLOW_MODE", "local").lower()
 
-WORKFLOW_MODE = os.getenv("A2A_WORKFLOW_MODE", "eventbridge").lower()
-USE_DDB_CHECKPOINTER = os.getenv("A2A_USE_DDB_CHECKPOINTER", "true").lower() == "true"
-HTTP_TIMEOUT = float(os.getenv("A2A_HTTP_TIMEOUT", "10"))
-DEFAULT_TRANSPORT_RESULTS = int(os.getenv("A2A_TRANSPORT_RESULTS", "3"))
 
-# Initialize boto3 client
-try:
-    eventbridge_client = boto3.client("events", region_name=AWS_REGION)
-except Exception as e:
-    logging.error(f"Failed to initialize boto3 client: {e}")
-    eventbridge_client = None
+# --- Logging Setup ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# --- Tool Definitions ---
 
-def dispatch_to_remote_agent(
-    task_id: str,
-    loan_case_id: str,
-    agent_name: str,
-    detail_type: str
-) -> Dict[str, Any]:
+# --- Generic JSON-RPC Client Tools ---
+
+def submit_task_to_remote_agent(agent_url: str, user_requirement: Dict[str, Any]) -> str:
     """
-    Sends a task to a remote agent via AWS EventBridge.
+    Submits a task to a remote agent and returns the task ID.
     """
-    if not is_eventbridge_mode():
-        logging.info(
-            "Skipping EventBridge dispatch for task %s because workflow mode is '%s'",
-            task_id,
-            WORKFLOW_MODE,
-        )
-        return {
-            "status": "skipped",
-            "message": "EventBridge mode disabled; running in local direct-call mode.",
-        }
+    endpoint = f"{agent_url.rstrip('/')}/jsonrpc"
+    method = "a2a.submit_task"
+    params = {"user_requirement": user_requirement}
 
-    if not eventbridge_client:
-        error_msg = "EventBridge client is not initialized."
-        logging.error(error_msg)
-        return {"status": "error", "message": error_msg}
-
-    event_detail = {
-        "task_id": task_id,
-        "loan_case_id": loan_case_id,
-    }
-
+    logger.info(f"Submitting task to {endpoint} with method '{method}'")
     try:
-        logging.info(f"Dispatching task {task_id} for case {loan_case_id} to {agent_name}...")
-        response = eventbridge_client.put_events(
-            Entries=[
-                {
-                    "Source": "a2a.root-agent",
-                    "DetailType": detail_type, # e.g., "Task.RecognizeTransactions"
-                    "Detail": json.dumps(event_detail),
-                    # 使用正確的 EventBusName
-                    "EventBusName": EVENT_BUS_NAME, 
-                }
-            ]
-        )
-        
-        failed_count = response.get("FailedEntryCount", 0)
-        if failed_count > 0:
-            error_message = f"Failed to send event to EventBridge for task {task_id}. Response: {response}"
-            logging.error(error_message)
-            return {"status": "error", "message": error_message}
-
-        logging.info(f"Successfully dispatched task {task_id} to {agent_name}. EventID: {response['Entries'][0]['EventId']}")
-        return {
-            "status": "success",
-            "message": f"Task {task_id} dispatched to {agent_name}.",
-            "event_id": response["Entries"][0]["EventId"],
-        }
+        response = jsonrpc_request(endpoint, method, **params)
+        result = Ok(response.data)
+        if not result.result or 'task_id' not in result.result:
+             raise ValueError("Invalid response from agent: 'task_id' not found.")
+        task_id = result.result['task_id']
+        logger.info(f"Successfully submitted task to {agent_url}, received task_id: {task_id}")
+        return task_id
     except Exception as e:
-        error_message = f"An exception occurred while dispatching task {task_id}: {e}"
-        logging.error(error_message)
-        return {"status": "error", "message": error_message}
+        logger.error(f"Failed to submit task to {agent_url}: {e}", exc_info=True)
+        raise RuntimeError(f"Could not submit task to {agent_url}") from e
 
+def get_task_status_from_remote_agent(agent_url: str, task_id: str) -> str:
+    """
+    Gets the status of a task from a remote agent.
+    """
+    endpoint = f"{agent_url.rstrip('/')}/jsonrpc"
+    method = "a2a.get_task_status"
+    params = {"task_id": task_id}
 
-def is_eventbridge_mode() -> bool:
-    return WORKFLOW_MODE == "eventbridge"
-
-
-def use_ddb_checkpointer() -> bool:
-    return USE_DDB_CHECKPOINTER
-
-
-def _compute_time_range(requirement: Dict[str, Any]) -> str:
-    explicit = requirement.get("time_range")
-    if explicit:
-        return explicit
-
-    arrival = requirement.get("desired_arrival_time")
-    if arrival:
-        try:
-            hour = int(str(arrival).split(":")[0])
-        except (ValueError, IndexError):
-            hour = None
-        if hour is not None:
-            if hour < 12:
-                return "上午"
-            if hour < 18:
-                return "下午"
-            return "晚上"
-
-    return "全天"
-
-
-def _normalize_arrival_time(value: Optional[str]) -> str:
-    if not value:
-        return "17:00:00"
-
-    text = str(value)
-    if len(text.split(":")) == 2:
-        return f"{text}:00"
-    return text
-
-
-def _default_travel_date(requirement: Dict[str, Any]) -> str:
-    date_value = requirement.get("travel_date")
-    if date_value:
-        return str(date_value)
-    return datetime.utcnow().date().isoformat()
-
-
-def fetch_weather_report(requirement: Dict[str, Any]) -> Dict[str, Any]:
-    params = {
-        "city": requirement.get("destination") or requirement.get("origin") or "台北",
-        "date": _default_travel_date(requirement),
-        "time_range": _compute_time_range(requirement),
-    }
-    endpoint = f"{REMOTE1_URL.rstrip('/')}/jsonrpc"
-    logging.info("Calling Weather Remote Agent via JSON-RPC: %s", endpoint)
+    logger.debug(f"Checking task status from {endpoint} for task_id: {task_id}")
     try:
-        response = jsonrpc_request(endpoint, "weather.report", **params)
-        data = response.data.result
-    except Exception as exc:
-        logging.error("Weather agent call failed: %s", exc)
-        raise RuntimeError(f"Weather agent request failed: {exc}") from exc
+        response = jsonrpc_request(endpoint, method, **params)
+        result = Ok(response.data)
+        if not result.result or 'status' not in result.result:
+            raise ValueError("Invalid response from agent: 'status' not found.")
+        status = result.result['status']
+        logger.debug(f"Status for task {task_id} at {agent_url} is: {status}")
+        return status
+    except Exception as e:
+        logger.error(f"Failed to get task status from {agent_url} for task {task_id}: {e}", exc_info=True)
+        # In case of failure, returning a non-DONE status is safer
+        return "UNKNOWN"
 
-    logging.debug("Weather agent response: %s", data)
-    return data
+def get_task_result_from_remote_agent(agent_url: str, task_id: str) -> Dict[str, Any]:
+    """
+    Gets the result of a completed task from a remote agent.
+    """
+    endpoint = f"{agent_url.rstrip('/')}/jsonrpc"
+    method = "a2a.get_task_result"
+    params = {"task_id": task_id}
 
-
-def fetch_transport_plans(requirement: Dict[str, Any]) -> Dict[str, Any]:
-    params = {
-        "destination": requirement.get("destination") or "台北",
-        "arrival_time": _normalize_arrival_time(requirement.get("desired_arrival_time")),
-        "date": _default_travel_date(requirement),
-        "results": requirement.get("transport_results", DEFAULT_TRANSPORT_RESULTS),
-    }
-    endpoint = f"{REMOTE2_URL.rstrip('/')}/jsonrpc"
-    logging.info("Calling Transport Remote Agent via JSON-RPC: %s", endpoint)
+    logger.info(f"Fetching task result from {endpoint} for task_id: {task_id}")
     try:
-        response = jsonrpc_request(endpoint, "transport.plans", **params)
-        data = response.data.result
-    except Exception as exc:
-        logging.error("Transport agent call failed: %s", exc)
-        raise RuntimeError(f"Transport agent request failed: {exc}") from exc
+        response = jsonrpc_request(endpoint, method, **params)
+        result = Ok(response.data)
+        if not result.result or 'result' not in result.result:
+            raise ValueError("Invalid response from agent: 'result' not found.")
+        task_result = result.result['result']
+        logger.info(f"Successfully fetched result for task {task_id} from {agent_url}")
+        return task_result
+    except Exception as e:
+        logger.error(f"Failed to get task result from {agent_url} for task {task_id}: {e}", exc_info=True)
+        raise RuntimeError(f"Could not get result for task {task_id} from {agent_url}") from e
 
-    logging.debug("Transport agent response: %s", data)
-    return data
 
-
-def request_summary(
-    task_id: str,
-    requirement: Dict[str, Any],
-    weather_report: Dict[str, Any],
-    transport_payload: Dict[str, Any],
-) -> Dict[str, Any]:
-    params = {
-        "task_id": task_id,
-        "user_requirement": {
-            "origin": requirement.get("origin") or "台北",
-            "destination": requirement.get("destination")
-            or weather_report.get("city")
-            or "台北",
-            "travel_date": _default_travel_date(requirement),
-            "desired_arrival_time": _normalize_arrival_time(
-                requirement.get("desired_arrival_time")
-            ),
-            "transport_note": requirement.get("transport_note"),
-        },
-        "weather_report": weather_report,
-        "transport": transport_payload,
-    }
+def submit_summary_task(
+    root_task_id: str,
+    user_requirement: Dict[str, Any],
+    weather_result: Dict[str, Any],
+    transport_result: Dict[str, Any],
+) -> str:
+    """
+    Submits the collected results to the summary agent.
+    """
     endpoint = f"{SUMMARY_URL.rstrip('/')}/jsonrpc"
-    logging.info("Calling Summary Agent via JSON-RPC: %s", endpoint)
-    try:
-        response = jsonrpc_request(endpoint, "summaries.create", **params)
-        data = response.data.result
-    except Exception as exc:
-        logging.error("Summary agent call failed: %s", exc)
-        raise RuntimeError(f"Summary agent request failed: {exc}") from exc
+    method = "a2a.submit_task"
+    params = {
+        "task_id": root_task_id, # Pass the root task_id
+        "user_requirement": user_requirement,
+        "weather_report": weather_result,
+        "transport": transport_result,
+    }
 
-    logging.debug("Summary agent response: %s", data)
-    return data
+    logger.info(f"Submitting final results to Summary Agent for task_id: {root_task_id}")
+    try:
+        response = jsonrpc_request(endpoint, method, **params)
+        result = Ok(response.data)
+        if not result.result or 'task_id' not in result.result:
+            raise ValueError("Invalid response from summary agent: 'task_id' not found.")
+        summary_task_id = result.result['task_id']
+        logger.info(f"Successfully submitted to summary agent, received task_id: {summary_task_id}")
+        return summary_task_id
+    except Exception as e:
+        logger.error(f"Failed to submit to summary agent for task {root_task_id}: {e}", exc_info=True)
+        raise RuntimeError("Could not submit task to summary agent") from e
+
+# --- Workflow Mode Helper ---
+def is_local_mode() -> bool:
+    """Determines if the workflow is in local JSON-RPC mode."""
+    return WORKFLOW_MODE == "local"
