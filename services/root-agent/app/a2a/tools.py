@@ -30,7 +30,7 @@ def submit_task_to_remote_agent(agent_url: str, user_requirement: Dict[str, Any]
 
     logger.info(f"Submitting task to {endpoint} with method '{method}' and params: {params}")
     try:
-        response = jsonrpc_request(endpoint, method, params=params)
+        response = jsonrpc_request(endpoint, method, params)
         result = Ok(response.data)
         if not result.result or 'task_id' not in result.result:
              raise ValueError("Invalid response from agent: 'task_id' not found.")
@@ -51,7 +51,7 @@ def get_task_status_from_remote_agent(agent_url: str, task_id: str) -> str:
 
     logger.info(f"Checking task status from {endpoint} with params: {params}")
     try:
-        response = jsonrpc_request(endpoint, method, params=params)
+        response = jsonrpc_request(endpoint, method, params)
         result = Ok(response.data)
         if not result.result or 'status' not in result.result:
             raise ValueError("Invalid response from agent: 'status' not found.")
@@ -73,7 +73,7 @@ def get_task_result_from_remote_agent(agent_url: str, task_id: str) -> Dict[str,
 
     logger.info(f"Fetching task result from {endpoint} for task_id: {task_id} with params: {params}")
     try:
-        response = jsonrpc_request(endpoint, method, params=params)
+        response = jsonrpc_request(endpoint, method, params)
         result = Ok(response.data)
         if not result.result or 'result' not in result.result:
             raise ValueError("Invalid response from agent: 'result' not found.")
@@ -105,7 +105,7 @@ def submit_summary_task(
 
     logger.info(f"Submitting final results to Summary Agent for task_id: {root_task_id} with params: {params}")
     try:
-        response = jsonrpc_request(endpoint, method, params=params)
+        response = jsonrpc_request(endpoint, method, params)
         result = Ok(response.data)
         if not result.result or 'task_id' not in result.result:
             raise ValueError("Invalid response from summary agent: 'task_id' not found.")
