@@ -193,8 +193,7 @@ async def jsonrpc_endpoint(request: Request):
     except json.JSONDecodeError:
         logger.warning(f"Received non-JSON request body: {req_str.decode()}")
 
-    logger.info(f"\n>>> globals(): {globals()}\n")
-    response_str = await async_dispatch(req_str.decode(), methods=globals())
+    response_str = await async_dispatch(req_str.decode())
     if response_str:
         response_json = json.loads(response_str)
         return JSONResponse(content=response_json)
