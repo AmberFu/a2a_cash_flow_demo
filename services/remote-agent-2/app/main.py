@@ -40,6 +40,10 @@ tasks_lock = threading.Lock()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """初始化與釋放 Remote Agent 需要的資源。"""
+    logger.info("--- SERVICE IDENTIFICATION ---")
+    logger.info("SERVICE NAME: Transport Remote Agent (remote-agent-2)")
+    logger.info(f"LISTENING ON PORT: {PORT}")
+    logger.info("-----------------------------")
     logger.info("Transport Remote Agent (Async) is starting up on port %s", PORT)
     logger.info(f"Registered JSON-RPC methods: {jsonrpcserver.methods.global_methods}")
     yield

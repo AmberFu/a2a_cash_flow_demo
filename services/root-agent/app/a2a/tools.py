@@ -17,6 +17,13 @@ WORKFLOW_MODE = os.getenv("A2A_WORKFLOW_MODE", "local").lower()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# --- A2A URL Configuration Logging ---
+logger.info("--- A2A URL Configuration ---")
+logger.info(f"REMOTE1_URL = {REMOTE1_URL}")
+logger.info(f"REMOTE2_URL = {REMOTE2_URL}")
+logger.info(f"SUMMARY_URL = {SUMMARY_URL}")
+logger.info("-----------------------------")
+
 
 # --- Generic JSON-RPC Client Tools ---
 
