@@ -75,11 +75,14 @@ def execute_transport_plan_task(task_id: str, params: Dict[str, Any]):
         # Simulate some work
         time.sleep(8) # Simulate a longer task
 
+        from datetime import date
+
         # 2. Execute the core logic
+        travel_date_str = params.get("travel_date", "")
         request = TransportPlanRequest(
             destination=params.get("destination", "台南"),
             arrival_time=params.get("desired_arrival_time", "15:30"),
-            date=params.get("travel_date", ""),
+            date=travel_date_str if travel_date_str else date.today(),
             results=3
         )
         logger.info(

@@ -78,10 +78,13 @@ def execute_weather_report_task(task_id: str, params: Dict[str, Any]):
         time.sleep(5)
 
         # 2. Execute the core logic
+        from datetime import date
+
         # Adapt params from user_requirement to WeatherReportRequest
+        travel_date_str = params.get("travel_date", "")
         request = WeatherReportRequest(
             city=params.get("destination", "台北"),
-            date=params.get("travel_date", ""),
+            date=travel_date_str if travel_date_str else date.today(),
             time_range="全天" # Simplified for this example
         )
         logger.info(
