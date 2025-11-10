@@ -90,6 +90,11 @@ kubectl set image deployment/root-agent \
   "root-agent-container=${FULL_IMAGE_TAG}" \
   -n $K8S_NAMESPACE
 
+# 注入時間戳環境變數，強制 Pod 重新建立
+kubectl set env deployment/root-agent \
+  "DEPLOY_TIMESTAMP=${VERSION_TAG}" \
+  -n $K8S_NAMESPACE
+
 # 套用 Service YAML (確保 Service 存在且指向正確的 Pods)
 kubectl apply -f kubernetes/service-root.yaml
 
@@ -105,6 +110,10 @@ echo "  - 使用映像: ${REMOTE1_FULL_IMAGE_TAG}"
 
 kubectl set image deployment/remote-agent-1 \
   "remote-agent-1-container=${REMOTE1_FULL_IMAGE_TAG}" \
+  -n $K8S_NAMESPACE
+
+kubectl set env deployment/remote-agent-1 \
+  "DEPLOY_TIMESTAMP=${VERSION_TAG}" \
   -n $K8S_NAMESPACE
 
 kubectl apply -f kubernetes/service-remote1.yaml
@@ -123,6 +132,10 @@ kubectl set image deployment/remote-agent-2 \
   "remote-agent-2-container=${REMOTE2_FULL_IMAGE_TAG}" \
   -n $K8S_NAMESPACE
 
+kubectl set env deployment/remote-agent-2 \
+  "DEPLOY_TIMESTAMP=${VERSION_TAG}" \
+  -n $K8S_NAMESPACE
+
 kubectl apply -f kubernetes/service-remote2.yaml
 
 echo "=== Remote Agent 2 Deployment Update Triggered! ==="
@@ -138,6 +151,10 @@ kubectl apply -f kubernetes/deployment-summary.yaml
 
 kubectl set image deployment/summary-agent \
   "summary-agent-container=${SUMMARY_FULL_IMAGE_TAG}" \
+  -n $K8S_NAMESPACE
+
+kubectl set env deployment/summary-agent \
+  "DEPLOY_TIMESTAMP=${VERSION_TAG}" \
   -n $K8S_NAMESPACE
 
 kubectl apply -f kubernetes/service-summary.yaml
