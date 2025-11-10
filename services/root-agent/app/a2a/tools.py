@@ -3,8 +3,8 @@
 import os
 import logging
 from typing import Dict, Any
-import requests
-import json
+
+from jsonrpcclient import request as jsonrpc_request
 
 # --- Configuration ---
 REMOTE1_URL = os.getenv("REMOTE1_URL", "http://remote-agent-1-service:50001")
@@ -17,69 +17,32 @@ WORKFLOW_MODE = os.getenv("A2A_WORKFLOW_MODE", "local").lower()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- A2A URL Configuration Logging ---
-logger.info("--- A2A URL Configuration ---")
-logger.info(f"REMOTE1_URL = {REMOTE1_URL}")
-logger.info(f"REMOTE2_URL = {REMOTE2_URL}")
-logger.info(f"SUMMARY_URL = {SUMMARY_URL}")
-logger.info("-----------------------------")
-
 
 # --- Generic JSON-RPC Client Tools ---
 
 def submit_task_to_remote_agent(agent_url: str, user_requirement: Dict[str, Any]) -> str:
     """
     Submits a task to a remote agent and returns the task ID.
-    This function now uses the `requests` library directly for diagnosis.
     """
     endpoint = f"{agent_url.rstrip('/')}/jsonrpc"
     method = "a2a.submit_task"
     params = {"user_requirement": user_requirement}
 
-    # Manually construct the JSON-RPC request payload
-    payload = {
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params,
-        "id": "root-agent-test"
-    }
-    headers = {'Content-Type': 'application/json'}
-
-    logger.info("--- DIAGNOSTIC: SUBMITTING TASK WITH REQUESTS LIBRARY ---")
-    logger.info(f"  - Endpoint: {endpoint}")
-    logger.info(f"  - Headers: {headers}")
-    logger.info(f"  - Payload: {json.dumps(payload)}")
-
+    logger.info(f"Submitting task to {endpoint} with method '{method}' and params: {params}")
     try:
-        # Use requests.post to send the request
-        http_response = requests.post(endpoint, headers=headers, data=json.dumps(payload), timeout=10)
-
-        logger.info(f"  - Response Status Code: {http_response.status_code}")
-        logger.info(f"  - Response Body: {http_response.text}")
-
-        http_response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
-
-        response_json = http_response.json()
-
-        if "error" in response_json:
-            logger.error(f"Remote agent at {agent_url} returned an error: {response_json['error']}")
-            raise ValueError(f"Error from remote agent: {response_json['error']}")
-
-        if "result" in response_json and "task_id" in response_json["result"]:
-            task_id = response_json["result"]["task_id"]
-            logger.info(f"Successfully submitted task via requests, received task_id: {task_id}")
-            logger.info("--- DIAGNOSTIC: REQUESTS LIBRARY SUCCEEDED ---")
+        response = jsonrpc_request(endpoint, method, params)
+        if "error" in response:
+            logger.error(f"Remote agent at {agent_url} returned an error: {response['error']}")
+            raise ValueError(f"Error from remote agent: {response['error']}")
+        if "result" in response and "task_id" in response["result"]:
+            task_id = response["result"]["task_id"]
+            logger.info(f"Successfully submitted task to {agent_url}, received task_id: {task_id}")
             return task_id
         else:
-            logger.error(f"Invalid response from {agent_url}: {response_json}")
+            logger.error(f"Invalid response from {agent_url}: {response}")
             raise ValueError("Invalid response from agent: 'task_id' not found.")
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"--- DIAGNOSTIC: REQUESTS LIBRARY FAILED ---")
-        logger.error(f"Failed to submit task to {agent_url} using requests: {e}", exc_info=True)
-        raise RuntimeError(f"Could not submit task to {agent_url}") from e
     except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}", exc_info=True)
+        logger.error(f"Failed to submit task to {agent_url}: {e}", exc_info=True)
         raise RuntimeError(f"Could not submit task to {agent_url}") from e
 
 def get_task_status_from_remote_agent(agent_url: str, task_id: str) -> str:
