@@ -71,6 +71,12 @@ def execute_summary_task(task_id: str, params: Dict[str, Any]):
         # Simulate some work
         time.sleep(3)
 
+        # Gracefully handle cases where weather or transport data might be missing
+        if not params.get("weather_report"):
+            logger.warning(f"Task {task_id}: Weather report is missing. Proceeding without it.")
+        if not params.get("transport"):
+            logger.warning(f"Task {task_id}: Transport plan is missing. Proceeding without it.")
+
         request = SummaryRequest(**params)
         logger.info(
             "Generating summary for task %s: destination=%s",

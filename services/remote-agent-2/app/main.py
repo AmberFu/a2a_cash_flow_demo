@@ -169,9 +169,16 @@ async def a2a_get_task_result(task_id: str) -> Dict[str, Any]:
             data={"task_id": task_id, "status": task["status"]},
         )
 
-    # Convert date object to string before returning
-    if task.get("result") and "date" in task["result"]:
-        task["result"]["date"] = task["result"]["date"].isoformat()
+    # Convert date and time objects to strings before returning
+    if task.get("result"):
+        if "date" in task["result"] and task["result"]["date"]:
+            task["result"]["date"] = task["result"]["date"].isoformat()
+        if "plans" in task["result"] and task["result"]["plans"]:
+            for plan in task["result"]["plans"]:
+                if "departure_time" in plan and plan["departure_time"]:
+                    plan["departure_time"] = plan["departure_time"].isoformat()
+                if "arrival_time" in plan and plan["arrival_time"]:
+                    plan["arrival_time"] = plan["arrival_time"].isoformat()
 
     return Success({
         "task_id": task_id,
