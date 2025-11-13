@@ -130,9 +130,20 @@ def _generate_weather_reminders(request: SummaryRequest) -> List[str]:
 def craft_summary_response(
     request: SummaryRequest, provider: str, model_id: str
 ) -> SummaryResponse:
-    selected_plans = _select_recommended_plans(request)
-    recommendation_items = _build_recommendation_items(selected_plans)
-    reminders = _generate_weather_reminders(request)
+    # Gracefully handle missing data
+    if request.transport:
+        selected_plans = _select_recommended_plans(request)
+        recommendation_items = _build_recommendation_items(selected_plans)
+    else:
+        recommendation_items = []
+
+    if request.weather_report:
+        reminders = _generate_weather_reminders(request)
+        weather_summary = request.weather_report.summary
+    else:
+        reminders = ["天氣資訊缺失，請查詢即時天氣預報。"]
+        weather_summary = "天氣資訊缺失。"
+
 
     overview = (
         f"{request.user_requirement.origin} → {request.user_requirement.destination}"
@@ -153,7 +164,7 @@ def craft_summary_response(
         model=model_id,
         overview=overview,
         recommended_plans=recommendation_items,
-        weather_summary=request.weather_report.summary,
+        weather_summary=weather_summary,
         weather_reminders=reminders,
     )
 

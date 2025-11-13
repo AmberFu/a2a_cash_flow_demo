@@ -101,7 +101,7 @@ def execute_weather_report_task(task_id: str, params: Dict[str, Any]):
             time_range=request.time_range,
             variables=variables,
             summary=summary,
-        ).model_dump()
+        ).model_dump(mode="json")
 
         # 3. Update status to DONE with the result
         with tasks_lock:
@@ -173,10 +173,6 @@ async def a2a_get_task_result(task_id: str) -> Dict[str, Any]:
             message="Task result is not ready",
             data={"task_id": task_id, "status": task["status"]},
         )
-
-    # Convert date object to string before returning
-    if task.get("result") and "date" in task["result"]:
-        task["result"]["date"] = task["result"]["date"].isoformat()
 
     return Success({
         "task_id": task_id,
