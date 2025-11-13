@@ -85,64 +85,47 @@ echo "  - 使用映像: ${FULL_IMAGE_TAG}"
 # 確認 configmap 有更新
 kubectl apply -f kubernetes/configmap-agent-models.yaml
 
-# 使用 kubectl set image 更新 Deployment，這會觸發滾動更新
-kubectl set image deployment/root-agent \
-  "root-agent-container=${FULL_IMAGE_TAG}" \
-  -n $K8S_NAMESPACE
-
-# 套用 Service YAML (確保 Service 存在且指向正確的 Pods)
+# 動態更新 YAML 並使用 kubectl apply
+sed -i.bak "s|image:.*a2a_demo_root_agent.*|image: ${FULL_IMAGE_TAG}|g" kubernetes/deployment-root.yaml
+kubectl apply -f kubernetes/deployment-root.yaml
 kubectl apply -f kubernetes/service-root.yaml
-
-echo "=== Root Agent Deployment Update Triggered! ==="
+echo "=== Root Agent Deployment Applied! ==="
 
 # Remote Agent 1 部署
 REMOTE1_AGENT_NAME="a2a_demo_remote_agent1"
 REMOTE1_ECR_PATH="${ECR_BASE}/${REMOTE1_AGENT_NAME}"
 REMOTE1_FULL_IMAGE_TAG="${REMOTE1_ECR_PATH}:${VERSION_TAG}"
 
-echo "--- 8. 部署 Remote Agent 1 (更新映像標籤) ---"
+echo "--- 8. 部署 Remote Agent 1 ---"
 echo "  - 使用映像: ${REMOTE1_FULL_IMAGE_TAG}"
-
-kubectl set image deployment/remote-agent-1 \
-  "remote-agent-1-container=${REMOTE1_FULL_IMAGE_TAG}" \
-  -n $K8S_NAMESPACE
-
+sed -i.bak "s|image:.*a2a_demo_remote_agent1.*|image: ${REMOTE1_FULL_IMAGE_TAG}|g" kubernetes/deployment-remote1.yaml
+kubectl apply -f kubernetes/deployment-remote1.yaml
 kubectl apply -f kubernetes/service-remote1.yaml
-
-echo "=== Remote Agent 1 Deployment Update Triggered! ==="
+echo "=== Remote Agent 1 Deployment Applied! ==="
 
 # Remote Agent 2 部署
 REMOTE2_AGENT_NAME="a2a_demo_remote_agent2"
 REMOTE2_ECR_PATH="${ECR_BASE}/${REMOTE2_AGENT_NAME}"
 REMOTE2_FULL_IMAGE_TAG="${REMOTE2_ECR_PATH}:${VERSION_TAG}"
 
-echo "--- 9. 部署 Remote Agent 2 (更新映像標籤) ---"
+echo "--- 9. 部署 Remote Agent 2 ---"
 echo "  - 使用映像: ${REMOTE2_FULL_IMAGE_TAG}"
-
-kubectl set image deployment/remote-agent-2 \
-  "remote-agent-2-container=${REMOTE2_FULL_IMAGE_TAG}" \
-  -n $K8S_NAMESPACE
-
+sed -i.bak "s|image:.*a2a_demo_remote_agent2.*|image: ${REMOTE2_FULL_IMAGE_TAG}|g" kubernetes/deployment-remote2.yaml
+kubectl apply -f kubernetes/deployment-remote2.yaml
 kubectl apply -f kubernetes/service-remote2.yaml
+echo "=== Remote Agent 2 Deployment Applied! ==="
 
-echo "=== Remote Agent 2 Deployment Update Triggered! ==="
-
+# Summary Agent 部署
 SUMMARY_AGENT_NAME="a2a_demo_summary_agent"
 SUMMARY_ECR_PATH="${ECR_BASE}/${SUMMARY_AGENT_NAME}"
 SUMMARY_FULL_IMAGE_TAG="${SUMMARY_ECR_PATH}:${VERSION_TAG}"
 
-echo "--- 10. 部署 Summary Agent (更新映像標籤) ---"
+echo "--- 10. 部署 Summary Agent ---"
 echo "  - 使用映像: ${SUMMARY_FULL_IMAGE_TAG}"
-
+sed -i.bak "s|image:.*a2a_demo_summary_agent.*|image: ${SUMMARY_FULL_IMAGE_TAG}|g" kubernetes/deployment-summary.yaml
 kubectl apply -f kubernetes/deployment-summary.yaml
-
-kubectl set image deployment/summary-agent \
-  "summary-agent-container=${SUMMARY_FULL_IMAGE_TAG}" \
-  -n $K8S_NAMESPACE
-
 kubectl apply -f kubernetes/service-summary.yaml
-
-echo "=== Summary Agent Deployment Update Triggered! ==="
+echo "=== Summary Agent Deployment Applied! ==="
 
 echo "\n====== CD Deployment Succeeded! ======\n"
 

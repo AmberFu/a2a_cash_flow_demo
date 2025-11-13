@@ -124,6 +124,10 @@ class JSONRPCHandler(BaseHTTPRequestHandler):
 
 def run_server(host: str = "0.0.0.0", port: int = 50010) -> None:
     """啟動 JSON-RPC 伺服器，並視需要套用 TLS。"""
+    print("--- SERVICE IDENTIFICATION ---")
+    print(f"SERVICE NAME: JSON-RPC Gateway")
+    print(f"LISTENING ON PORT: {port}")
+    print("-----------------------------")
     httpd = HTTPServer((host, port), JSONRPCHandler)
 
     cert_path = os.getenv("JSONRPC_TLS_CERT")

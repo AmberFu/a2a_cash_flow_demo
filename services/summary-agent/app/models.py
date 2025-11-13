@@ -121,6 +121,6 @@ class SummaryRequest(BaseModel):
 
     task_id: str = Field(..., description="Root agent assigned task ID")
     user_requirement: UserTravelRequirement
-    weather_report: WeatherReport
-    transport: TransportPlanEnvelope
+    weather_report: Optional[WeatherReport] = None
+    transport: Optional[TransportPlanEnvelope] = None
 
