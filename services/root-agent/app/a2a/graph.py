@@ -118,20 +118,25 @@ def fetch_results_node(state: AgentState) -> dict:
     task_id = state['task_id']
     logger.info(f"[{task_id}] Fetching results for tasks: R1={r1_task_id}, R2={r2_task_id}")
 
+    result1 = None
+    result2 = None
     try:
         result1 = tools.get_task_result_from_remote_agent(tools.REMOTE1_URL, r1_task_id)
-        result2 = tools.get_task_result_from_remote_agent(tools.REMOTE2_URL, r2_task_id)
-
-        message = AIMessage(content="Successfully fetched results from remote agents. Now submitting for summary.")
-        return {
-            "remote1_result": result1,
-            "remote2_result": result2,
-            "status": "SUMMARIZING",
-            "messages": [message],
-        }
     except Exception as e:
-        logger.error(f"[{task_id}] Failed to fetch results: {e}", exc_info=True)
-        return {"status": "ERROR_FETCHING", "messages": [AIMessage(content=f"Error fetching results: {e}")]}
+        logger.error(f"[{task_id}] Failed to fetch results for R1: {e}", exc_info=True)
+
+    try:
+        result2 = tools.get_task_result_from_remote_agent(tools.REMOTE2_URL, r2_task_id)
+    except Exception as e:
+        logger.error(f"[{task_id}] Failed to fetch results for R2: {e}", exc_info=True)
+
+    message = AIMessage(content="Finished fetching results from remote agents. Now submitting for summary.")
+    return {
+        "remote1_result": result1,
+        "remote2_result": result2,
+        "status": "SUMMARIZING",
+        "messages": [message],
+    }
 
 
 def summarize_node(state: AgentState) -> dict:

@@ -42,6 +42,10 @@ tasks_lock = threading.Lock()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """初始化與釋放 Remote Agent 需要的資源。"""
+    logger.info("--- SERVICE IDENTIFICATION ---")
+    logger.info("SERVICE NAME: Weather Remote Agent (remote-agent-1)")
+    logger.info(f"LISTENING ON PORT: {PORT}")
+    logger.info("-----------------------------")
     logger.info("Weather Remote Agent (Async) is starting up on port %s", PORT)
     logger.info(f"Registered JSON-RPC methods: {jsonrpcserver.methods.global_methods}")
     yield
@@ -74,10 +78,13 @@ def execute_weather_report_task(task_id: str, params: Dict[str, Any]):
         time.sleep(5)
 
         # 2. Execute the core logic
+        from datetime import date
+
         # Adapt params from user_requirement to WeatherReportRequest
+        travel_date_str = params.get("travel_date", "")
         request = WeatherReportRequest(
             city=params.get("destination", "台北"),
-            date=params.get("travel_date", ""),
+            date=travel_date_str if travel_date_str else date.today(),
             time_range="全天" # Simplified for this example
         )
         logger.info(
@@ -94,7 +101,7 @@ def execute_weather_report_task(task_id: str, params: Dict[str, Any]):
             time_range=request.time_range,
             variables=variables,
             summary=summary,
-        ).model_dump()
+        ).model_dump(mode="json")
 
         # 3. Update status to DONE with the result
         with tasks_lock:
@@ -198,8 +205,7 @@ async def jsonrpc_endpoint(request: Request):
     except json.JSONDecodeError:
         logger.warning(f"Received non-JSON request body: {req_str.decode()}")
 
-    logger.info(f"\n>>> globals(): {globals()}\n")
-    response_str = await async_dispatch(req_str.decode(), methods=globals())
+    response_str = await async_dispatch(req_str.decode())
     if response_str:
         response_json = json.loads(response_str)
         return JSONResponse(content=response_json)

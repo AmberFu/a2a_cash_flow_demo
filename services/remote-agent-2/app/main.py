@@ -40,6 +40,10 @@ tasks_lock = threading.Lock()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """初始化與釋放 Remote Agent 需要的資源。"""
+    logger.info("--- SERVICE IDENTIFICATION ---")
+    logger.info("SERVICE NAME: Transport Remote Agent (remote-agent-2)")
+    logger.info(f"LISTENING ON PORT: {PORT}")
+    logger.info("-----------------------------")
     logger.info("Transport Remote Agent (Async) is starting up on port %s", PORT)
     logger.info(f"Registered JSON-RPC methods: {jsonrpcserver.methods.global_methods}")
     yield
@@ -71,11 +75,14 @@ def execute_transport_plan_task(task_id: str, params: Dict[str, Any]):
         # Simulate some work
         time.sleep(8) # Simulate a longer task
 
+        from datetime import date
+
         # 2. Execute the core logic
+        travel_date_str = params.get("travel_date", "")
         request = TransportPlanRequest(
             destination=params.get("destination", "台南"),
             arrival_time=params.get("desired_arrival_time", "15:30"),
-            date=params.get("travel_date", ""),
+            date=travel_date_str if travel_date_str else date.today(),
             results=3
         )
         logger.info(
@@ -90,7 +97,7 @@ def execute_transport_plan_task(task_id: str, params: Dict[str, Any]):
             requested_arrival_time=request.arrival_time,
             date=request.date,
             plans=plans,
-        ).model_dump()
+        ).model_dump(mode="json")
 
         # 3. Update status to DONE with the result
         with tasks_lock:
@@ -193,8 +200,7 @@ async def jsonrpc_endpoint(request: Request):
     except json.JSONDecodeError:
         logger.warning(f"Received non-JSON request body: {req_str.decode()}")
 
-    logger.info(f"\n>>> globals(): {globals()}\n")
-    response_str = await async_dispatch(req_str.decode(), methods=globals())
+    response_str = await async_dispatch(req_str.decode())
     if response_str:
         response_json = json.loads(response_str)
         return JSONResponse(content=response_json)
